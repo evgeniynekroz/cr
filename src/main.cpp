@@ -19,7 +19,6 @@
 #include <cctype>
 #include <cstdint>
 #include <functional>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -28,11 +27,8 @@
 using namespace geode::prelude;
 
 namespace cr {
-    // ===== CONFIG =====
     static constexpr char const* kTursoUrlRaw = "libsql://custom-rates-evgen.aws-eu-west-1.turso.io";
 
-    // Если у тебя другой XOR-ключ — замени его тут.
-    // Сейчас оставлен тот вариант, который мы уже использовали.
     static constexpr std::array<uint8_t, 10> kXorKey = {
         0xb1, 0x9a, 0x94, 0x8d, 0x90,
         0x85, 0xcd, 0xcf, 0xcd, 0xc9
@@ -87,7 +83,6 @@ namespace cr {
         "ujneft",
     };
 
-    // ===== UTILS =====
     static std::string lower(std::string s) {
         std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
             return static_cast<char>(std::tolower(c));
@@ -160,14 +155,14 @@ namespace cr {
         Notification::create(text.c_str(), icon)->show();
     }
 
-    static ByteVector toBytes(std::string const& s) {
-        return ByteVector(s.begin(), s.end());
-    }
-
     static void bootstrap();
 
     static std::string pipelineUrl() {
         return g_tursoUrl + "/v2/pipeline";
+    }
+
+    static geode::ByteVector toBytes(std::string const& s) {
+        return geode::ByteVector(s.begin(), s.end());
     }
 
     static std::string makePipelineBody(std::string const& sql) {
@@ -261,7 +256,7 @@ namespace cr {
         req.header("Content-Type", "application/json");
         req.body(toBytes(makePipelineBody(sql)));
 
-        auto res = req.post(pipelineUrl()).get();
+        auto res = req.post(pipelineUrl()).unwrap();
         if (!res || !res->ok()) {
             if (onErr) {
                 onErr(res ? res->string().unwrapOr("Request failed") : "Request failed");
@@ -532,7 +527,6 @@ namespace cr {
         );
     }
 
-    // ===== CUSTOM RATES OVERLAY =====
     class CustomRatesLayer : public CCLayerColor {
     private:
         Tab m_tab = Tab::Sent;
@@ -939,12 +933,10 @@ namespace cr {
     };
 }
 
-// ===== MENU BUTTON / BOOTSTRAP =====
 class $modify(CustomRatesMenuLayer, MenuLayer) {
     bool init() override {
         if (!MenuLayer::init()) return false;
 
-        // Запускаем bootstrap только из главного меню.
         cr::bootstrap();
 
         auto menu = this->getChildByID("bottom-menu");
@@ -974,7 +966,6 @@ class $modify(CustomRatesMenuLayer, MenuLayer) {
     }
 };
 
-// ===== LEVEL BROWSER SHORTCUT =====
 class $modify(CustomRatesBrowserLayer, LevelBrowserLayer) {
     void onEnter() override {
         LevelBrowserLayer::onEnter();
@@ -1004,7 +995,6 @@ class $modify(CustomRatesBrowserLayer, LevelBrowserLayer) {
     }
 };
 
-// ===== LEVEL INFO: SEND BUTTON =====
 class $modify(CustomRatesLevelInfoLayer, LevelInfoLayer) {
     void onEnter() override {
         LevelInfoLayer::onEnter();
@@ -1058,7 +1048,6 @@ class $modify(CustomRatesLevelInfoLayer, LevelInfoLayer) {
     }
 };
 
-// ===== INFO LAYER: RATE BY [MODERATOR] =====
 class $modify(CustomRatesInfoLayer, InfoLayer) {
     void onEnter() override {
         InfoLayer::onEnter();
