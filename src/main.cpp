@@ -12,8 +12,9 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 
-#include <Geode/loader/Event.hpp>
-#include <Geode/utils/web.hpp>
+#include <CCHttpClient.h>
+#include <CCHttpRequest.h>
+#include <CCHttpResponse.h>
 
 #include <algorithm>
 #include <array>
@@ -72,8 +73,6 @@ namespace cr {
         int64_t sentAt = 0;
         int64_t ratedAt = 0;
     };
-
-    using WebTask = web::WebTask;
 
     static bool g_bootstrapped = false;
     static std::string g_tursoUrl;
@@ -243,57 +242,6 @@ namespace cr {
         return e;
     }
 
-    class SqlTaskNode : public CCObject {
-    public:
-        geode::EventListener<WebTask> m_listener;
-        std::function<void(matjson::Value const&)> m_onOk;
-        std::function<void(std::string const&)> m_onErr;
-        bool m_done = false;
-
-        static SqlTaskNode* create(
-            std::function<void(matjson::Value const&)> onOk,
-            std::function<void(std::string const&)> onErr
-        ) {
-            auto ret = new SqlTaskNode();
-            ret->m_onOk = std::move(onOk);
-            ret->m_onErr = std::move(onErr);
-            return ret;
-        }
-
-        void start(WebTask task) {
-            m_listener.bind([this](WebTask::Event* e) {
-                if (m_done) return;
-
-                if (auto res = e->getValue()) {
-                    m_done = true;
-
-                    if (res->ok()) {
-                        auto text = res->string().unwrapOr("");
-                        auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
-                        if (m_onOk) m_onOk(parsed);
-                    } else {
-                        if (m_onErr) {
-                            auto text = res->string().unwrapOr("");
-                            m_onErr(text.empty() ? "Request failed" : text);
-                        }
-                    }
-
-                    delete this;
-                    return;
-                }
-
-                if (e->isCancelled()) {
-                    m_done = true;
-                    if (m_onErr) m_onErr("Request cancelled");
-                    delete this;
-                    return;
-                }
-            });
-
-            m_listener.setFilter(task);
-        }
-    };
-
     static void runSql(
         std::string const& sql,
         std::function<void(matjson::Value const&)> onOk,
@@ -301,16 +249,46 @@ namespace cr {
     ) {
         if (!g_bootstrapped) bootstrap();
 
-        web::WebRequest req;
-        req.header("Authorization", std::string("Bearer ") + g_tursoToken);
-        req.header("Content-Type", "application/json");
+        auto request = new cocos2d::extension::CCHttpRequest();
+        request->setUrl(pipelineUrl().c_str());
+        request->setRequestType(cocos2d::extension::CCHttpRequest::Type::kHttpPost);
+
+        std::vector<std::string> headers;
+        headers.emplace_back(std::string("Authorization: Bearer ") + g_tursoToken);
+        headers.emplace_back("Content-Type: application/json");
+        request->setHeaders(headers);
 
         auto body = makePipelineBody(sql);
-        ByteVector bytes(body.begin(), body.end());
-        req.body(bytes);
+        request->setRequestData(body.c_str(), body.size());
 
-        auto helper = SqlTaskNode::create(onOk, onErr);
-        helper->start(req.post(pipelineUrl()));
+        request->setResponseCallback([onOk, onErr](cocos2d::extension::CCHttpClient*, cocos2d::extension::CCHttpResponse* response) {
+            if (!response) {
+                if (onErr) onErr("Request failed");
+                return;
+            }
+
+            if (!response->isSucceed()) {
+                if (onErr) {
+                    std::string msg = "Request failed";
+                    auto err = response->getErrorBuffer();
+                    if (err && *err) msg = err;
+                    onErr(msg);
+                }
+                return;
+            }
+
+            std::string text;
+            auto data = response->getResponseData();
+            if (data && !data->empty()) {
+                text.assign(data->begin(), data->end());
+            }
+
+            auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
+            onOk(parsed);
+        });
+
+        cocos2d::extension::CCHttpClient::getInstance()->send(request);
+        request->release();
     }
 
     static std::string sqlSentList() {
