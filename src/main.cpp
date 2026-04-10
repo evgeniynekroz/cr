@@ -13,6 +13,7 @@
 #include <Geode/modify/MenuLayer.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <functional>
@@ -29,6 +30,8 @@ namespace cr {
         Recent = 1,
         Top = 2,
     };
+
+    static constexpr int kRowsPerPage = 8;
 
     struct LevelEntry {
         int64_t levelID = 0;
