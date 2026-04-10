@@ -12,9 +12,9 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 
-#include <CCHttpClient.h>
-#include <CCHttpRequest.h>
-#include <CCHttpResponse.h>
+#include <network/HttpClient.h>
+#include <network/HttpRequest.h>
+#include <network/HttpResponse.h>
 
 #include <algorithm>
 #include <array>
@@ -242,37 +242,28 @@ namespace cr {
         return e;
     }
 
-    class SqlHttpHandler : public CCNode {
-    public:
-        std::function<void(matjson::Value const&)> onOk;
-        std::function<void(std::string const&)> onErr;
+    static void runSql(
+        std::string const& sql,
+        std::function<void(matjson::Value const&)> onOk,
+        std::function<void(std::string const&)> onErr = nullptr
+    ) {
+        if (!g_bootstrapped) bootstrap();
 
-        bool init() override {
-            return CCNode::init();
-        }
+        auto request = new network::HttpRequest();
+        request->setUrl(pipelineUrl().c_str());
+        request->setRequestType(network::HttpRequest::Type::POST);
 
-        static SqlHttpHandler* create(
-            std::function<void(matjson::Value const&)> ok,
-            std::function<void(std::string const&)> err
-        ) {
-            auto ret = new SqlHttpHandler();
-            if (ret && ret->init()) {
-                ret->onOk = std::move(ok);
-                ret->onErr = std::move(err);
-                return ret;
-            }
+        std::vector<std::string> headers;
+        headers.emplace_back(std::string("Authorization: Bearer ") + g_tursoToken);
+        headers.emplace_back("Content-Type: application/json");
+        request->setHeaders(headers);
 
-            CC_SAFE_DELETE(ret);
-            return nullptr;
-        }
+        auto body = makePipelineBody(sql);
+        request->setRequestData(body.c_str(), body.size());
 
-        void onHttpResponse(
-            cocos2d::extension::CCHttpClient*,
-            cocos2d::extension::CCHttpResponse* response
-        ) {
+        request->setResponseCallback([onOk, onErr](network::HttpClient*, network::HttpResponse* response) {
             if (!response) {
                 if (onErr) onErr("Request failed");
-                this->release();
                 return;
             }
 
@@ -285,7 +276,6 @@ namespace cr {
                     }
                     onErr(msg);
                 }
-                this->release();
                 return;
             }
 
@@ -296,39 +286,10 @@ namespace cr {
             }
 
             auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
-            if (onOk) onOk(parsed);
+            onOk(parsed);
+        });
 
-            this->release();
-        }
-    };
-
-    static void runSql(
-        std::string const& sql,
-        std::function<void(matjson::Value const&)> onOk,
-        std::function<void(std::string const&)> onErr = nullptr
-    ) {
-        if (!g_bootstrapped) bootstrap();
-
-        auto handler = SqlHttpHandler::create(onOk, onErr);
-
-        auto request = new cocos2d::extension::CCHttpRequest();
-        request->setUrl(pipelineUrl().c_str());
-        request->setRequestType(cocos2d::extension::CCHttpRequest::Type::kHttpPost);
-
-        std::vector<std::string> headers;
-        headers.emplace_back(std::string("Authorization: Bearer ") + g_tursoToken);
-        headers.emplace_back("Content-Type: application/json");
-        request->setHeaders(headers);
-
-        auto body = makePipelineBody(sql);
-        request->setRequestData(body.c_str(), body.size());
-
-        request->setResponseCallback(
-            handler,
-            httpresponse_selector(SqlHttpHandler::onHttpResponse)
-        );
-
-        cocos2d::extension::CCHttpClient::getInstance()->send(request);
+        network::HttpClient::getInstance()->send(request);
         request->release();
     }
 
