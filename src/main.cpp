@@ -12,9 +12,9 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 
-#include <Geode/cocos/extensions/CCHttpClient.h>
-#include <Geode/cocos/extensions/CCHttpRequest.h>
-#include <Geode/cocos/extensions/CCHttpResponse.h>
+#include <CCHttpClient.h>
+#include <CCHttpRequest.h>
+#include <CCHttpResponse.h>
 
 #include <algorithm>
 #include <array>
