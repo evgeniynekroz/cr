@@ -249,9 +249,9 @@ namespace cr {
     ) {
         if (!g_bootstrapped) bootstrap();
 
-        auto request = new network::HttpRequest();
+        auto request = new cocos2d::network::HttpRequest();
         request->setUrl(pipelineUrl().c_str());
-        request->setRequestType(network::HttpRequest::Type::POST);
+        request->setRequestType(cocos2d::network::HttpRequest::Type::POST);
 
         std::vector<std::string> headers;
         headers.emplace_back(std::string("Authorization: Bearer ") + g_tursoToken);
@@ -261,7 +261,7 @@ namespace cr {
         auto body = makePipelineBody(sql);
         request->setRequestData(body.c_str(), body.size());
 
-        request->setResponseCallback([onOk, onErr](network::HttpClient*, network::HttpResponse* response) {
+        request->setResponseCallback([onOk, onErr](cocos2d::network::HttpClient*, cocos2d::network::HttpResponse* response) {
             if (!response) {
                 if (onErr) onErr("Request failed");
                 return;
@@ -289,7 +289,7 @@ namespace cr {
             onOk(parsed);
         });
 
-        network::HttpClient::getInstance()->send(request);
+        cocos2d::network::HttpClient::getInstance()->send(request);
         request->release();
     }
 
