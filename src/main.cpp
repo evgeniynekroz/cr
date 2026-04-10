@@ -19,6 +19,7 @@
 #include <cctype>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -30,9 +31,8 @@ namespace cr {
     // ===== CONFIG =====
     static constexpr char const* kTursoUrlRaw = "libsql://custom-rates-evgen.aws-eu-west-1.turso.io";
 
-    // ВАЖНО:
-    // Это просто XOR-байты токена, который ты дал.
-    // Если у тебя другой XOR-ключ, замени kXorKey на свой реальный ключ.
+    // Если у тебя другой XOR-ключ — замени его тут.
+    // Сейчас оставлен тот вариант, который мы уже использовали.
     static constexpr std::array<uint8_t, 10> kXorKey = {
         0xb1, 0x9a, 0x94, 0x8d, 0x90,
         0x85, 0xcd, 0xcf, 0xcd, 0xc9
@@ -160,8 +160,8 @@ namespace cr {
         Notification::create(text.c_str(), icon)->show();
     }
 
-    static web::ByteVector toBytes(std::string const& s) {
-        return web::ByteVector(s.begin(), s.end());
+    static ByteVector toBytes(std::string const& s) {
+        return ByteVector(s.begin(), s.end());
     }
 
     static void bootstrap();
@@ -261,18 +261,17 @@ namespace cr {
         req.header("Content-Type", "application/json");
         req.body(toBytes(makePipelineBody(sql)));
 
-        req.post(pipelineUrl()).then([onOk, onErr](web::WebResponse* res) {
-            if (!res || !res->ok()) {
-                if (onErr) {
-                    onErr(res ? res->string().unwrapOr("Request failed") : "Request failed");
-                }
-                return;
+        auto res = req.post(pipelineUrl()).get();
+        if (!res || !res->ok()) {
+            if (onErr) {
+                onErr(res ? res->string().unwrapOr("Request failed") : "Request failed");
             }
+            return;
+        }
 
-            auto text = res->string().unwrapOr("");
-            auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
-            onOk(parsed);
-        });
+        auto text = res->string().unwrapOr("");
+        auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
+        onOk(parsed);
     }
 
     static std::string sqlSentList() {
@@ -559,7 +558,6 @@ namespace cr {
             this->setPosition({ 0.f, 0.f });
             this->setID("cr-overlay");
 
-            // Dark panel with outline-ish background
             auto panelSize = CCSize { 470.f, 330.f };
             m_panel = CCLayerColor::create(ccc4(22, 28, 36, 245), panelSize.width, panelSize.height);
             m_panel->setAnchorPoint({ 0.5f, 0.5f });
@@ -572,7 +570,6 @@ namespace cr {
 
             auto centerX = panelSize.width / 2.f;
 
-            // Close button
             auto closeMenu = CCMenu::create();
             closeMenu->setPosition({ 0.f, 0.f });
             m_panel->addChild(closeMenu, 10);
@@ -589,7 +586,6 @@ namespace cr {
             closeBtn->setPosition({ panelSize.width - 18.f, panelSize.height - 16.f });
             closeMenu->addChild(closeBtn);
 
-            // Tabs
             auto tabMenu = CCMenu::create();
             tabMenu->setPosition({ 0.f, 0.f });
             m_panel->addChild(tabMenu, 5);
@@ -948,7 +944,7 @@ class $modify(CustomRatesMenuLayer, MenuLayer) {
     bool init() override {
         if (!MenuLayer::init()) return false;
 
-        // network bootstrapping only from main menu
+        // Запускаем bootstrap только из главного меню.
         cr::bootstrap();
 
         auto menu = this->getChildByID("bottom-menu");
