@@ -12,12 +12,7 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 
-#include <CCHttpClient.h>
-#include <CCHttpRequest.h>
-#include <CCHttpResponse.h>
-
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstdint>
 #include <functional>
@@ -29,36 +24,6 @@
 using namespace geode::prelude;
 
 namespace cr {
-    static constexpr char const* kTursoUrlRaw = "libsql://custom-rates-evgen.aws-eu-west-1.turso.io";
-
-    static constexpr std::array<uint8_t, 10> kXorKey = {
-        0xb1, 0x9a, 0x94, 0x8d, 0x90,
-        0x85, 0xcd, 0xcf, 0xcd, 0xc9
-    };
-
-    static constexpr uint8_t kEncryptedToken[] = {
-        0xd4, 0xe3, 0xde, 0xe5, 0xf2, 0xc2, 0xae, 0xa6, 0x82, 0xa0, 0xfb, 0xdc, 0xce, 0xc8, 0xc2, 0xd1,
-        0x9c, 0x9c, 0x84, 0xba, 0xf8, 0xf4, 0xc6, 0xb8, 0xf3, 0xc6, 0x84, 0xf9, 0x84, 0xa2, 0xc1, 0xc2,
-        0xc2, 0xce, 0xda, 0xbc, 0xe3, 0xaa, 0xb4, 0x83, 0xd9, 0xd3, 0xfe, 0xe2, 0xf9, 0xe6, 0xa3, 0xac,
-        0xa4, 0x85, 0xf2, 0xd0, 0xe4, 0xd4, 0xc8, 0xd4, 0xa4, 0x80, 0xa7, 0x8c, 0x82, 0xd4, 0xee, 0xd8,
-        0xa4, 0xc8, 0x99, 0xa4, 0xfd, 0x87, 0xe5, 0xfd, 0xe7, 0xc4, 0xfd, 0xe9, 0xa6, 0x86, 0xa7, 0xa6,
-        0xd8, 0xd7, 0xd0, 0xc8, 0xa5, 0xdf, 0x89, 0x96, 0xf8, 0x93, 0xf6, 0xd3, 0xe0, 0xc0, 0xd4, 0xe6,
-        0xba, 0x82, 0x9e, 0xf9, 0x82, 0xd4, 0xfe, 0xdb, 0xfb, 0xc9, 0x99, 0xa4, 0xb7, 0x90, 0xe5, 0xc3,
-        0xe0, 0xc3, 0xc4, 0xd0, 0xb7, 0x95, 0x9a, 0x93, 0xdc, 0xc3, 0xc0, 0xc3, 0xfb, 0xdc, 0xa0, 0x99,
-        0xa1, 0x80, 0xd8, 0xed, 0xfd, 0xee, 0xfd, 0xe9, 0xa6, 0x86, 0xa7, 0xa6, 0xd8, 0xd5, 0xc3, 0xdb,
-        0xfd, 0xc8, 0xff, 0x85, 0xa4, 0x87, 0xdc, 0xcf, 0xe0, 0xd4, 0xfa, 0xcc, 0xff, 0x82, 0x9e, 0xf9,
-        0x81, 0xd4, 0xc0, 0xcc, 0xa5, 0xc9, 0x9a, 0x89, 0xa7, 0x93, 0xf5, 0xf1, 0xe0, 0xc2, 0xc4, 0xed,
-        0xa7, 0x82, 0x9a, 0x90, 0xc6, 0xc0, 0xc0, 0xdc, 0xa4, 0xcb, 0xa7, 0x85, 0xa5, 0x80, 0xdf, 0xaa,
-        0xba, 0xfd, 0xc2, 0xcc, 0xbc, 0xbc, 0x81, 0xbd, 0xd3, 0xe0, 0xa3, 0xf4, 0xfb, 0xf3, 0x81, 0x85,
-        0xac, 0xf1, 0xf0, 0xe2, 0xcb, 0xbf, 0xa1, 0xc9, 0xa3, 0xe2, 0xff, 0x8f, 0xfb, 0xf3, 0xde, 0xa0,
-        0xdf, 0xc4, 0xfd, 0xbe, 0xfe, 0xe4, 0x89, 0xe0, 0xac, 0xcf, 0xe8, 0xfd, 0x80, 0x99, 0xf8, 0xa5,
-        0xc2, 0xd8, 0xd2, 0xf8, 0xd9, 0xf5, 0x8e, 0xa0, 0xf9, 0xa4, 0xc1, 0xc8, 0xa1, 0xd7, 0xd8, 0xbc,
-        0x9b, 0xf7, 0xa0, 0x84, 0xe7, 0xa2, 0xe0, 0xd7, 0xa5, 0xee, 0xb4, 0x96, 0x98, 0xe4, 0xfe, 0xe0,
-        0xfb, 0xd4, 0xc7, 0xb2, 0xfe, 0x8d, 0xaa
-    };
-
-    static constexpr int kRowsPerPage = 8;
-
     enum class Tab {
         Sent = 0,
         Recent = 1,
@@ -75,8 +40,6 @@ namespace cr {
     };
 
     static bool g_bootstrapped = false;
-    static std::string g_tursoUrl;
-    static std::string g_tursoToken;
 
     static std::unordered_set<std::string> g_admins = {
         "mapperok232",
@@ -92,55 +55,6 @@ namespace cr {
         return s;
     }
 
-    static std::string escapeSql(std::string const& in) {
-        std::string out;
-        out.reserve(in.size() + 16);
-        for (char c : in) {
-            if (c == '\'') out += "''";
-            else out += c;
-        }
-        return out;
-    }
-
-    static std::string escapeJson(std::string const& in) {
-        std::string out;
-        out.reserve(in.size() + 16);
-        for (char c : in) {
-            switch (c) {
-                case '\\': out += "\\\\"; break;
-                case '"':  out += "\\\""; break;
-                case '\n': out += "\\n"; break;
-                case '\r': out += "\\r"; break;
-                case '\t': out += "\\t"; break;
-                default:   out += c; break;
-            }
-        }
-        return out;
-    }
-
-    static std::string normalizeUrl(std::string url) {
-        while (!url.empty() && std::isspace((unsigned char)url.back())) url.pop_back();
-        while (!url.empty() && std::isspace((unsigned char)url.front())) url.erase(url.begin());
-
-        if (url.rfind("libsql://", 0) == 0) {
-            url = "https://" + url.substr(std::string("libsql://").size());
-        } else if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0) {
-            url = "https://" + url;
-        }
-
-        while (!url.empty() && url.back() == '/') url.pop_back();
-        return url;
-    }
-
-    static std::string decryptToken() {
-        std::string out;
-        out.reserve(std::size(kEncryptedToken));
-        for (size_t i = 0; i < std::size(kEncryptedToken); ++i) {
-            out.push_back(static_cast<char>(kEncryptedToken[i] ^ kXorKey[i % kXorKey.size()]));
-        }
-        return out;
-    }
-
     static std::string currentPlayerName() {
         auto gm = GameManager::sharedState();
         if (!gm) return "";
@@ -153,268 +67,12 @@ namespace cr {
     }
 
     static void toast(std::string const& message, NotificationIcon icon = NotificationIcon::Success) {
-        auto text = std::string("Custom Rates: ") + message;
-        Notification::create(text.c_str(), icon)->show();
-    }
-
-    static void bootstrap();
-
-    static std::string pipelineUrl() {
-        return g_tursoUrl + "/v2/pipeline";
-    }
-
-    static std::string makePipelineBody(std::string const& sql) {
-        return std::string("{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"")
-            + escapeJson(sql) +
-            "\"}}]}";
-    }
-
-    static std::optional<std::string> extractDataString(matjson::Value const& root) {
-        auto resultsRes = root["results"].asArray();
-        if (!resultsRes) return std::nullopt;
-
-        auto const& results = *resultsRes;
-        if (results.empty()) return std::nullopt;
-
-        auto const& first = results.front();
-        if (first["error"].isObject()) return std::nullopt;
-
-        auto rowsRes = first["response"]["result"]["rows"].asArray();
-        if (!rowsRes) return std::nullopt;
-
-        auto const& rows = *rowsRes;
-        if (rows.empty()) return std::nullopt;
-
-        auto const& row = rows.front();
-        auto rowRes = row.asArray();
-        if (!rowRes) return std::nullopt;
-
-        auto const& cols = *rowRes;
-        if (cols.empty()) return std::nullopt;
-
-        if (cols.front().isString()) {
-            return cols.front().asString().unwrapOr("");
-        }
-
-        return std::nullopt;
-    }
-
-    static std::vector<LevelEntry> parseLevelsJson(std::string const& jsonStr) {
-        std::vector<LevelEntry> out;
-        auto parsed = matjson::parse(jsonStr).unwrapOr(matjson::Value());
-
-        if (!parsed.isArray()) return out;
-
-        auto arrRes = parsed.asArray();
-        if (!arrRes) return out;
-
-        auto const& arr = *arrRes;
-        for (auto const& item : arr) {
-            LevelEntry e;
-            e.levelID = item["level_id"].asInt().unwrapOr(0);
-            e.blueStars = item["blue_stars"].asInt().unwrapOr(0);
-            e.moderator = item["moderator"].asString().unwrapOr("");
-            e.sentBy = item["sent_by"].asString().unwrapOr("");
-            e.sentAt = item["sent_at"].asInt().unwrapOr(0);
-            e.ratedAt = item["rated_at"].asInt().unwrapOr(0);
-
-            if (e.levelID > 0) {
-                out.push_back(std::move(e));
-            }
-        }
-
-        return out;
-    }
-
-    static std::optional<LevelEntry> parseOneLevelJson(std::string const& jsonStr) {
-        auto parsed = matjson::parse(jsonStr).unwrapOr(matjson::Value());
-        if (!parsed.isObject()) return std::nullopt;
-
-        LevelEntry e;
-        e.levelID = parsed["level_id"].asInt().unwrapOr(0);
-        e.blueStars = parsed["blue_stars"].asInt().unwrapOr(0);
-        e.moderator = parsed["moderator"].asString().unwrapOr("");
-        e.sentBy = parsed["sent_by"].asString().unwrapOr("");
-        e.sentAt = parsed["sent_at"].asInt().unwrapOr(0);
-        e.ratedAt = parsed["rated_at"].asInt().unwrapOr(0);
-
-        if (e.levelID <= 0) return std::nullopt;
-        return e;
-    }
-
-    static void runSql(
-        std::string const& sql,
-        std::function<void(matjson::Value const&)> onOk,
-        std::function<void(std::string const&)> onErr = nullptr
-    ) {
-        if (!g_bootstrapped) bootstrap();
-
-        auto request = new cocos2d::extension::CCHttpRequest();
-        request->setUrl(pipelineUrl().c_str());
-        request->setRequestType(cocos2d::extension::CCHttpRequest::Type::kHttpPost);
-
-        std::vector<std::string> headers;
-        headers.emplace_back(std::string("Authorization: Bearer ") + g_tursoToken);
-        headers.emplace_back("Content-Type: application/json");
-        request->setHeaders(headers);
-
-        auto body = makePipelineBody(sql);
-        request->setRequestData(body.c_str(), body.size());
-
-        request->setResponseCallback([onOk, onErr](cocos2d::extension::CCHttpClient*, cocos2d::extension::CCHttpResponse* response) {
-            if (!response) {
-                if (onErr) onErr("Request failed");
-                return;
-            }
-
-            if (!response->isSucceed()) {
-                if (onErr) {
-                    std::string msg = "Request failed";
-                    auto err = response->getErrorBuffer();
-                    if (err && *err) msg = err;
-                    onErr(msg);
-                }
-                return;
-            }
-
-            std::string text;
-            auto data = response->getResponseData();
-            if (data && !data->empty()) {
-                text.assign(data->begin(), data->end());
-            }
-
-            auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
-            onOk(parsed);
-        });
-
-        cocos2d::extension::CCHttpClient::getInstance()->send(request);
-        request->release();
-    }
-
-    static std::string sqlSentList() {
-        return R"SQL(
-            SELECT COALESCE(
-                json_group_array(
-                    json_object(
-                        'level_id', level_id,
-                        'sent_by', sent_by,
-                        'sent_at', sent_at
-                    )
-                ),
-                '[]'
-            ) AS data
-            FROM (
-                SELECT level_id, sent_by, sent_at
-                FROM sent_levels
-                ORDER BY sent_at DESC
-                LIMIT 100
-            );
-        )SQL";
-    }
-
-    static std::string sqlRecentList() {
-        return R"SQL(
-            SELECT COALESCE(
-                json_group_array(
-                    json_object(
-                        'level_id', level_id,
-                        'blue_stars', blue_stars,
-                        'moderator', moderator,
-                        'rated_at', rated_at
-                    )
-                ),
-                '[]'
-            ) AS data
-            FROM (
-                SELECT level_id, blue_stars, moderator, rated_at
-                FROM rated_levels
-                ORDER BY rated_at DESC
-                LIMIT 100
-            );
-        )SQL";
-    }
-
-    static std::string sqlTopList() {
-        return R"SQL(
-            SELECT COALESCE(
-                json_group_array(
-                    json_object(
-                        'level_id', level_id,
-                        'blue_stars', blue_stars,
-                        'moderator', moderator,
-                        'rated_at', rated_at
-                    )
-                ),
-                '[]'
-            ) AS data
-            FROM (
-                SELECT level_id, blue_stars, moderator, rated_at
-                FROM rated_levels
-                ORDER BY blue_stars DESC, rated_at DESC
-                LIMIT 100
-            );
-        )SQL";
-    }
-
-    static std::string sqlRatedMeta(int64_t levelID) {
-        return "SELECT json_object("
-               "'level_id', level_id, "
-               "'blue_stars', blue_stars, "
-               "'moderator', moderator, "
-               "'sent_by', '', "
-               "'sent_at', 0, "
-               "'rated_at', rated_at"
-               ") AS data "
-               "FROM rated_levels "
-               "WHERE level_id = " + std::to_string(levelID) + " "
-               "LIMIT 1;";
-    }
-
-    static std::string sqlSendLevel(int64_t levelID, std::string const& sentBy) {
-        return "INSERT OR IGNORE INTO sent_levels (level_id, sent_by, sent_at) VALUES ("
-            + std::to_string(levelID) + ", '"
-            + escapeSql(sentBy) + "', unixepoch());";
-    }
-
-    static std::string sqlDeleteSent(int64_t levelID) {
-        return "DELETE FROM sent_levels WHERE level_id = " + std::to_string(levelID) + ";";
-    }
-
-    static void loadAdminsFromDb() {
-        runSql(
-            "SELECT COALESCE(json_group_array(username), '[]') AS data "
-            "FROM (SELECT username FROM admins ORDER BY username ASC);",
-            [](matjson::Value const& root) {
-                auto data = extractDataString(root);
-                if (!data) return;
-
-                auto parsed = matjson::parse(*data).unwrapOr(matjson::Value());
-                if (!parsed.isArray()) return;
-
-                auto arrRes = parsed.asArray();
-                if (!arrRes) return;
-
-                auto const& arr = *arrRes;
-                for (auto const& item : arr) {
-                    if (item.isString()) {
-                        g_admins.insert(lower(item.asString().unwrapOr("")));
-                    }
-                }
-            },
-            [](std::string const& err) {
-                log::warn("Admin cache load failed: {}", err);
-            }
-        );
+        Notification::create(message.c_str(), icon)->show();
     }
 
     static void bootstrap() {
         if (g_bootstrapped) return;
         g_bootstrapped = true;
-
-        g_tursoUrl = normalizeUrl(kTursoUrlRaw);
-        g_tursoToken = decryptToken();
-
-        loadAdminsFromDb();
     }
 
     static int64_t getLevelID(GJGameLevel* level) {
@@ -433,127 +91,57 @@ namespace cr {
         return spr;
     }
 
+    // Offline / build-safe stubs.
     static void fetchLevels(
-        Tab tab,
+        Tab,
         std::function<void(std::vector<LevelEntry>)> onOk,
-        std::function<void(std::string const&)> onErr = nullptr
+        std::function<void(std::string const&)> = nullptr
     ) {
-        std::string sql;
-        switch (tab) {
-            case Tab::Sent:   sql = sqlSentList(); break;
-            case Tab::Recent: sql = sqlRecentList(); break;
-            case Tab::Top:    sql = sqlTopList(); break;
-        }
-
-        runSql(
-            sql,
-            [onOk, onErr](matjson::Value const& root) {
-                auto data = extractDataString(root);
-                if (!data) {
-                    if (onErr) onErr("Invalid DB response");
-                    else onOk({});
-                    return;
-                }
-
-                onOk(parseLevelsJson(*data));
-            },
-            [onErr, onOk](std::string const& err) {
-                if (onErr) onErr(err);
-                else onOk({});
-            }
-        );
+        if (onOk) onOk({});
     }
 
     static void fetchRatedMeta(
-        int64_t levelID,
+        int64_t,
         std::function<void(std::optional<LevelEntry>)> onOk,
-        std::function<void(std::string const&)> onErr = nullptr
+        std::function<void(std::string const&)> = nullptr
     ) {
-        runSql(
-            sqlRatedMeta(levelID),
-            [onOk](matjson::Value const& root) {
-                auto data = extractDataString(root);
-                if (!data) {
-                    onOk(std::nullopt);
-                    return;
-                }
-
-                onOk(parseOneLevelJson(*data));
-            },
-            [onErr, onOk](std::string const& err) {
-                if (onErr) onErr(err);
-                else onOk(std::nullopt);
-            }
-        );
+        if (onOk) onOk(std::nullopt);
     }
 
     static void sendLevelToDb(
-        int64_t levelID,
-        std::string const& sender,
+        int64_t,
+        std::string const&,
         std::function<void(bool, std::string const&)> onDone
     ) {
-        runSql(
-            sqlSendLevel(levelID, sender),
-            [onDone](matjson::Value const&) {
-                onDone(true, "Level sent to admins!");
-            },
-            [onDone](std::string const& err) {
-                onDone(false, err);
-            }
-        );
+        auto msg = "HTTP disabled for now (offline build-safe mode)";
+        toast(msg, NotificationIcon::Error);
+        if (onDone) onDone(false, msg);
     }
 
     static void deleteSentFromDb(
-        int64_t levelID,
+        int64_t,
         std::function<void(bool, std::string const&)> onDone
     ) {
-        runSql(
-            sqlDeleteSent(levelID),
-            [onDone](matjson::Value const&) {
-                onDone(true, "Deleted from Sent.");
-            },
-            [onDone](std::string const& err) {
-                onDone(false, err);
-            }
-        );
+        auto msg = "HTTP disabled for now (offline build-safe mode)";
+        toast(msg, NotificationIcon::Error);
+        if (onDone) onDone(false, msg);
     }
 
     static void rateLevelInDb(
-        int64_t levelID,
-        int blueStars,
-        std::string const& moderator,
+        int64_t,
+        int,
+        std::string const&,
         std::function<void(bool, std::string const&)> onDone
     ) {
-        runSql(
-            sqlDeleteSent(levelID),
-            [levelID, blueStars, moderator, onDone](matjson::Value const&) {
-                std::string sql =
-                    "INSERT OR REPLACE INTO rated_levels (level_id, blue_stars, moderator, rated_at) VALUES ("
-                    + std::to_string(levelID) + ", "
-                    + std::to_string(blueStars) + ", '"
-                    + escapeSql(moderator) + "', unixepoch());";
-
-                runSql(
-                    sql,
-                    [onDone](matjson::Value const&) {
-                        onDone(true, "Level rated!");
-                    },
-                    [onDone](std::string const& err) {
-                        onDone(false, err);
-                    }
-                );
-            },
-            [onDone](std::string const& err) {
-                onDone(false, err);
-            }
-        );
+        auto msg = "HTTP disabled for now (offline build-safe mode)";
+        toast(msg, NotificationIcon::Error);
+        if (onDone) onDone(false, msg);
     }
 
     class CustomRatesLayer : public CCLayerColor {
     private:
         Tab m_tab = Tab::Sent;
         int m_page = 0;
-        int m_requestSeq = 0;
         std::vector<LevelEntry> m_entries;
 
         CCLayerColor* m_panel = nullptr;
@@ -641,7 +229,7 @@ namespace cr {
             m_rowsRoot->setPosition({ 0.f, 0.f });
             m_panel->addChild(m_rowsRoot, 3);
 
-            m_statusLabel = CCLabelBMFont::create("Loading...", "bigFont.fnt");
+            m_statusLabel = CCLabelBMFont::create("Offline mode", "bigFont.fnt");
             m_statusLabel->setScale(0.20f);
             m_statusLabel->setAnchorPoint({ 0.f, 0.5f });
             m_statusLabel->setPosition({ 14.f, 16.f });
@@ -714,44 +302,24 @@ namespace cr {
             m_page = 0;
             updateTabVisuals();
 
+            m_entries.clear();
             if (m_statusLabel) {
-                m_statusLabel->setString("Loading...");
+                m_statusLabel->setString("Offline mode");
             }
-
-            int const token = ++m_requestSeq;
-            this->retain();
 
             fetchLevels(
                 tab,
-                [this, token](std::vector<LevelEntry> entries) {
-                    if (token != m_requestSeq) {
-                        this->release();
-                        return;
-                    }
-
+                [this](std::vector<LevelEntry> entries) {
                     m_entries = std::move(entries);
-
                     if (m_statusLabel) {
-                        m_statusLabel->setString(
-                            (std::string("Loaded: ") + std::to_string(m_entries.size())).c_str()
-                        );
+                        m_statusLabel->setString((std::string("Loaded: ") + std::to_string(m_entries.size())).c_str());
                     }
-
-                    this->release();
                     renderPage();
                 },
-                [this, token](std::string const& err) {
-                    if (token != m_requestSeq) {
-                        this->release();
-                        return;
-                    }
-
-                    m_entries.clear();
+                [this](std::string const& err) {
                     if (m_statusLabel) {
                         m_statusLabel->setString(err.c_str());
                     }
-
-                    this->release();
                     renderPage();
                 }
             );
@@ -913,13 +481,11 @@ namespace cr {
             int64_t const levelID = node->getTag();
             if (levelID <= 0) return;
 
-            this->retain();
             deleteSentFromDb(levelID, [this](bool ok, std::string const& msg) {
                 toast(msg, ok ? NotificationIcon::Success : NotificationIcon::Error);
                 if (ok && m_tab == Tab::Sent) {
                     loadTab(Tab::Sent);
                 }
-                this->release();
             });
         }
 
@@ -1081,7 +647,7 @@ class $modify(CustomRatesInfoLayer, InfoLayer) {
 
         auto win = CCDirector::get()->getWinSize();
 
-        auto label = CCLabelBMFont::create("checking rate...", "bigFont.fnt");
+        auto label = CCLabelBMFont::create("offline mode", "bigFont.fnt");
         label->setScale(0.24f);
         label->setColor(ccc3(90, 220, 255));
         label->setID("cr-rate-label");
@@ -1094,28 +660,6 @@ class $modify(CustomRatesInfoLayer, InfoLayer) {
             return;
         }
 
-        label->retain();
-
-        cr::fetchRatedMeta(
-            levelID,
-            [label](std::optional<cr::LevelEntry> info) {
-                if (!label) return;
-
-                if (!info || info->moderator.empty()) {
-                    label->setVisible(false);
-                    label->release();
-                    return;
-                }
-
-                label->setString((std::string("rate by ") + info->moderator).c_str());
-                label->setVisible(true);
-                label->release();
-            },
-            [label](std::string const&) {
-                if (!label) return;
-                label->setVisible(false);
-                label->release();
-            }
-        );
+        label->setVisible(false);
     }
 };
