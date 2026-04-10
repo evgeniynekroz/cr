@@ -12,13 +12,16 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 
-#include <Geode/utils/web.hpp>
+#include <network/HttpClient.h>
+#include <network/HttpRequest.h>
+#include <network/HttpResponse.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -161,10 +164,6 @@ namespace cr {
         return g_tursoUrl + "/v2/pipeline";
     }
 
-    static geode::ByteVector toBytes(std::string const& s) {
-        return geode::ByteVector(s.begin(), s.end());
-    }
-
     static std::string makePipelineBody(std::string const& sql) {
         return std::string("{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"")
             + escapeJson(sql) +
@@ -251,22 +250,48 @@ namespace cr {
     ) {
         if (!g_bootstrapped) bootstrap();
 
-        web::WebRequest req;
-        req.header("Authorization", std::string("Bearer ") + g_tursoToken);
-        req.header("Content-Type", "application/json");
-        req.body(toBytes(makePipelineBody(sql)));
+        auto request = new cocos2d::network::HttpRequest();
+        request->setUrl(pipelineUrl().c_str());
+        request->setRequestType(cocos2d::network::HttpRequest::Type::POST);
 
-        auto res = req.post(pipelineUrl()).unwrap();
-        if (!res || !res->ok()) {
-            if (onErr) {
-                onErr(res ? res->string().unwrapOr("Request failed") : "Request failed");
+        std::vector<std::string> headers;
+        headers.emplace_back(std::string("Authorization: Bearer ") + g_tursoToken);
+        headers.emplace_back("Content-Type: application/json");
+        request->setHeaders(headers);
+
+        auto body = makePipelineBody(sql);
+        request->setRequestData(body.c_str(), body.size());
+
+        request->setResponseCallback([onOk, onErr](cocos2d::network::HttpClient*, cocos2d::network::HttpResponse* response) {
+            if (!response) {
+                if (onErr) onErr("Request failed");
+                return;
             }
-            return;
-        }
 
-        auto text = res->string().unwrapOr("");
-        auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
-        onOk(parsed);
+            if (!response->isSucceed()) {
+                if (onErr) {
+                    std::string msg = "Request failed";
+                    auto errBuf = response->getErrorBuffer();
+                    if (errBuf && !errBuf->empty()) {
+                        msg.assign(errBuf->begin(), errBuf->end());
+                    }
+                    onErr(msg);
+                }
+                return;
+            }
+
+            auto data = response->getResponseData();
+            std::string text;
+            if (data && !data->empty()) {
+                text.assign(data->begin(), data->end());
+            }
+
+            auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
+            onOk(parsed);
+        });
+
+        cocos2d::network::HttpClient::getInstance()->send(request);
+        request->release();
     }
 
     static std::string sqlSentList() {
@@ -1010,6 +1035,8 @@ class $modify(CustomRatesLevelInfoLayer, LevelInfoLayer) {
         auto share = CCSprite::createWithSpriteFrameName("GJ_shareBtn_001.png");
         if (share) {
             share->setScale(0.85f);
+        } else {
+            share = CCSprite::createWithSpriteFrameName("GJ_plusBtn_001.png");
         }
 
         auto btn = CCMenuItemSpriteExtra::create(
