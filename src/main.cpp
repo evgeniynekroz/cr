@@ -23,7 +23,6 @@
 #include <optional>
 #include <string>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 using namespace geode::prelude;
@@ -74,7 +73,7 @@ namespace cr {
         int64_t ratedAt = 0;
     };
 
-    using WebTask = decltype(std::declval<web::WebRequest>().post(std::string{}));
+    using WebTask = web::WebTask;
 
     static bool g_bootstrapped = false;
     static std::string g_tursoUrl;
@@ -246,7 +245,7 @@ namespace cr {
 
     class SqlTaskNode : public CCObject {
     public:
-        EventListener<WebTask> m_listener;
+        geode::EventListener<WebTask> m_listener;
         std::function<void(matjson::Value const&)> m_onOk;
         std::function<void(std::string const&)> m_onErr;
         bool m_done = false;
@@ -305,7 +304,10 @@ namespace cr {
         web::WebRequest req;
         req.header("Authorization", std::string("Bearer ") + g_tursoToken);
         req.header("Content-Type", "application/json");
-        req.body(ByteVector(makePipelineBody(sql).begin(), makePipelineBody(sql).end()));
+
+        auto body = makePipelineBody(sql);
+        ByteVector bytes(body.begin(), body.end());
+        req.body(bytes);
 
         auto helper = SqlTaskNode::create(onOk, onErr);
         helper->start(req.post(pipelineUrl()));
