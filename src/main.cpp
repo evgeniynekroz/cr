@@ -12,16 +12,15 @@
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 
-#include <network/HttpClient.h>
-#include <network/HttpRequest.h>
-#include <network/HttpResponse.h>
+#include <Geode/cocos/extensions/CCHttpClient.h>
+#include <Geode/cocos/extensions/CCHttpRequest.h>
+#include <Geode/cocos/extensions/CCHttpResponse.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdint>
 #include <functional>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -243,6 +242,66 @@ namespace cr {
         return e;
     }
 
+    class SqlHttpHandler : public CCNode {
+    public:
+        std::function<void(matjson::Value const&)> onOk;
+        std::function<void(std::string const&)> onErr;
+
+        bool init() override {
+            return CCNode::init();
+        }
+
+        static SqlHttpHandler* create(
+            std::function<void(matjson::Value const&)> ok,
+            std::function<void(std::string const&)> err
+        ) {
+            auto ret = new SqlHttpHandler();
+            if (ret && ret->init()) {
+                ret->onOk = std::move(ok);
+                ret->onErr = std::move(err);
+                return ret;
+            }
+
+            CC_SAFE_DELETE(ret);
+            return nullptr;
+        }
+
+        void onHttpResponse(
+            cocos2d::extension::CCHttpClient*,
+            cocos2d::extension::CCHttpResponse* response
+        ) {
+            if (!response) {
+                if (onErr) onErr("Request failed");
+                this->release();
+                return;
+            }
+
+            if (!response->isSucceed()) {
+                if (onErr) {
+                    std::string msg = "Request failed";
+                    auto err = response->getErrorBuffer();
+                    if (err && *err) {
+                        msg = err;
+                    }
+                    onErr(msg);
+                }
+                this->release();
+                return;
+            }
+
+            std::string text;
+            auto data = response->getResponseData();
+            if (data && !data->empty()) {
+                text.assign(data->begin(), data->end());
+            }
+
+            auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
+            if (onOk) onOk(parsed);
+
+            this->release();
+        }
+    };
+
     static void runSql(
         std::string const& sql,
         std::function<void(matjson::Value const&)> onOk,
@@ -250,9 +309,11 @@ namespace cr {
     ) {
         if (!g_bootstrapped) bootstrap();
 
-        auto request = new cocos2d::network::HttpRequest();
+        auto handler = SqlHttpHandler::create(onOk, onErr);
+
+        auto request = new cocos2d::extension::CCHttpRequest();
         request->setUrl(pipelineUrl().c_str());
-        request->setRequestType(cocos2d::network::HttpRequest::Type::POST);
+        request->setRequestType(cocos2d::extension::CCHttpRequest::Type::kHttpPost);
 
         std::vector<std::string> headers;
         headers.emplace_back(std::string("Authorization: Bearer ") + g_tursoToken);
@@ -262,35 +323,12 @@ namespace cr {
         auto body = makePipelineBody(sql);
         request->setRequestData(body.c_str(), body.size());
 
-        request->setResponseCallback([onOk, onErr](cocos2d::network::HttpClient*, cocos2d::network::HttpResponse* response) {
-            if (!response) {
-                if (onErr) onErr("Request failed");
-                return;
-            }
+        request->setResponseCallback(
+            handler,
+            httpresponse_selector(SqlHttpHandler::onHttpResponse)
+        );
 
-            if (!response->isSucceed()) {
-                if (onErr) {
-                    std::string msg = "Request failed";
-                    auto errBuf = response->getErrorBuffer();
-                    if (errBuf && !errBuf->empty()) {
-                        msg.assign(errBuf->begin(), errBuf->end());
-                    }
-                    onErr(msg);
-                }
-                return;
-            }
-
-            auto data = response->getResponseData();
-            std::string text;
-            if (data && !data->empty()) {
-                text.assign(data->begin(), data->end());
-            }
-
-            auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
-            onOk(parsed);
-        });
-
-        cocos2d::network::HttpClient::getInstance()->send(request);
+        cocos2d::extension::CCHttpClient::getInstance()->send(request);
         request->release();
     }
 
