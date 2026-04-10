@@ -23,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 using namespace geode::prelude;
@@ -72,6 +73,8 @@ namespace cr {
         int64_t sentAt = 0;
         int64_t ratedAt = 0;
     };
+
+    using WebTask = decltype(std::declval<web::WebRequest>().post(std::string{}));
 
     static bool g_bootstrapped = false;
     static std::string g_tursoUrl;
@@ -241,37 +244,25 @@ namespace cr {
         return e;
     }
 
-    class SqlTaskNode : public CCNode {
+    class SqlTaskNode : public CCObject {
     public:
-        EventListener<web::WebTask> m_listener;
+        EventListener<WebTask> m_listener;
         std::function<void(matjson::Value const&)> m_onOk;
         std::function<void(std::string const&)> m_onErr;
         bool m_done = false;
-
-        bool init() override {
-            return CCNode::init();
-        }
 
         static SqlTaskNode* create(
             std::function<void(matjson::Value const&)> onOk,
             std::function<void(std::string const&)> onErr
         ) {
             auto ret = new SqlTaskNode();
-            if (ret && ret->init()) {
-                ret->m_onOk = std::move(onOk);
-                ret->m_onErr = std::move(onErr);
-                ret->autorelease();
-                return ret;
-            }
-
-            CC_SAFE_DELETE(ret);
-            return nullptr;
+            ret->m_onOk = std::move(onOk);
+            ret->m_onErr = std::move(onErr);
+            return ret;
         }
 
-        void start(web::WebTask task) {
-            this->retain();
-
-            m_listener.bind([this](web::WebTask::Event* e) {
+        void start(WebTask task) {
+            m_listener.bind([this](WebTask::Event* e) {
                 if (m_done) return;
 
                 if (auto res = e->getValue()) {
@@ -288,14 +279,14 @@ namespace cr {
                         }
                     }
 
-                    this->release();
+                    delete this;
                     return;
                 }
 
                 if (e->isCancelled()) {
                     m_done = true;
                     if (m_onErr) m_onErr("Request cancelled");
-                    this->release();
+                    delete this;
                     return;
                 }
             });
@@ -314,7 +305,7 @@ namespace cr {
         web::WebRequest req;
         req.header("Authorization", std::string("Bearer ") + g_tursoToken);
         req.header("Content-Type", "application/json");
-        req.body(makePipelineBody(sql));
+        req.body(ByteVector(makePipelineBody(sql).begin(), makePipelineBody(sql).end()));
 
         auto helper = SqlTaskNode::create(onOk, onErr);
         helper->start(req.post(pipelineUrl()));
