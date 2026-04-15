@@ -9,10 +9,9 @@
 #include <Geode/binding/CreatorLayer.hpp>
 #include <Geode/binding/ProfilePage.hpp>
 #include <Geode/binding/PlayLayer.hpp>
-#include <Geode/binding/GJRateStarsLayer.hpp>
-#include <Geode/binding/FLAlertLayer.hpp>
-#include <Geode/binding/TextInputNode.hpp>
 #include <Geode/binding/GJDropDownLayer.hpp>
+#include <Geode/binding/GJUserScore.hpp>
+#include <Geode/binding/FLAlertLayer.hpp>
 
 #include <Geode/modify/InfoLayer.hpp>
 #include <Geode/modify/LevelBrowserLayer.hpp>
@@ -25,6 +24,7 @@
 #include <Geode/loader/Event.hpp>
 #include <Geode/utils/web.hpp>
 #include <Geode/ui/TextInput.hpp>
+#include <Geode/ui/Popup.hpp>
 
 #include <algorithm>
 #include <array>
