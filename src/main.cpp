@@ -1,5 +1,9 @@
 #include <Geode/Geode.hpp>
 
+// Обязательные инклюды для HTTP и событий
+#include <Geode/utils/web.hpp>
+#include <Geode/loader/Event.hpp>
+
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/InfoLayer.hpp>
@@ -22,7 +26,6 @@
 #include <Geode/modify/ProfilePage.hpp>
 #include <Geode/modify/PlayLayer.hpp>
 
-#include <Geode/utils/web.hpp>
 #include <Geode/ui/TextInput.hpp>
 
 #include <algorithm>
@@ -38,8 +41,8 @@
 
 using namespace geode::prelude;
 
-// Алиас для HTTP-запросов с явным указанием namespace
-using WebTask = geode::Task<geode::Result<geode::web::WebResponse>>;
+// Определяем тип задачи для HTTP запросов
+using WebTask = geode::Task<geode::Result<geode::utils::web::WebResponse>>;
 
 namespace cr {
 
@@ -176,7 +179,8 @@ static std::vector<matjson::Value> safeArray(matjson::Value const& val) {
     if (!val.isArray()) return {};
     auto res = val.asArray();
     if (!res) return {};
-    return std::vector<matjson::Value>(res.unwrap().begin(), res.unwrap().end());
+    auto const& actualArr = res.unwrap();
+    return std::vector<matjson::Value>(actualArr.begin(), actualArr.end());
 }
 
 static std::optional<std::string> extractFirstString(matjson::Value const& root) {
@@ -193,16 +197,13 @@ static std::optional<std::string> extractFirstString(matjson::Value const& root)
     if (cols.empty()) return std::nullopt;
 
     auto const& cell = cols.front();
-
-    if (cell.isString())
-        return cell.asString().unwrapOr("");
+    if (cell.isString()) return cell.asString().unwrapOr("");
     if (cell.isObject()) {
         auto v = cell["value"];
         if (v.isString()) return v.asString().unwrapOr("");
         if (v.isNumber()) return std::to_string(v.asInt().unwrapOr(0));
     }
-    if (cell.isNumber())
-        return std::to_string(cell.asInt().unwrapOr(0));
+    if (cell.isNumber()) return std::to_string(cell.asInt().unwrapOr(0));
 
     return std::nullopt;
 }
@@ -231,13 +232,13 @@ struct SqlTask {
             if (t->done) return;
             if (auto* res = ev->getValue()) {
                 t->done = true;
-                if (res->isOk()) {
-                    auto const& webRes = res->unwrap();
+                if (res->ok()) {
+                    auto const& webRes = res->value();
                     auto text    = webRes.string().unwrapOr("{}");
                     auto parsed  = matjson::parse(text).unwrapOr(matjson::Value());
                     if (t->onOk) t->onOk(parsed);
                 } else {
-                    auto err = res->unwrapErr();
+                    auto err = res->error();
                     if (t->onErr) t->onErr(err);
                 }
                 delete t;
