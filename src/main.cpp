@@ -98,9 +98,6 @@ static std::unordered_set<std::string> g_admins = {
 };
 static std::unordered_map<int64_t, std::string> g_nameCache;
 
-// ────────────────────────────────────────────────────────────
-//  Утилиты
-// ────────────────────────────────────────────────────────────
 static std::string lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
         [](unsigned char c){ return (char)std::tolower(c); });
@@ -204,10 +201,6 @@ static std::optional<std::string> extractFirstString(matjson::Value const& root)
     return std::nullopt;
 }
 
-// ────────────────────────────────────────────────────────────
-//  HTTP — используем postSync в отдельном потоке
-//  Callback вызывается на главном потоке через Loader::get()->queueInMainThread
-// ────────────────────────────────────────────────────────────
 static void runSql(
     std::string const& sql,
     std::function<void(matjson::Value const&)> onOk,
@@ -229,14 +222,12 @@ static void runSql(
             auto textRes = res.string();
             std::string text = textRes.isOk() ? textRes.unwrap() : "{}";
             auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
-
             Loader::get()->queueInMainThread([onOk, parsed]() {
                 if (onOk) onOk(parsed);
             });
         } else {
             std::string err = std::string(res.errorMessage());
             if (err.empty()) err = "Request failed (code " + std::to_string(res.code()) + ")";
-
             Loader::get()->queueInMainThread([onErr, err]() {
                 if (onErr) onErr(err);
             });
@@ -244,9 +235,6 @@ static void runSql(
     }).detach();
 }
 
-// ────────────────────────────────────────────────────────────
-//  Парсинг
-// ────────────────────────────────────────────────────────────
 static std::vector<LevelEntry> parseLevelsJson(std::string const& jsonStr) {
     std::vector<LevelEntry> out;
     auto parsed = matjson::parse(jsonStr).unwrapOr(matjson::Value());
@@ -262,7 +250,6 @@ static std::vector<LevelEntry> parseLevelsJson(std::string const& jsonStr) {
         e.sentBy     = item["sent_by"].asString().unwrapOr("");
         e.sentAt     = item["sent_at"].asInt().unwrapOr(0);
         e.ratedAt    = item["rated_at"].asInt().unwrapOr(0);
-
         if (g_nameCache.count(e.levelID)) e.levelName = g_nameCache[e.levelID];
         if (e.levelID > 0) out.push_back(std::move(e));
     }
@@ -272,7 +259,6 @@ static std::vector<LevelEntry> parseLevelsJson(std::string const& jsonStr) {
 static std::optional<LevelEntry> parseOneLevelJson(std::string const& jsonStr) {
     auto parsed = matjson::parse(jsonStr).unwrapOr(matjson::Value());
     if (!parsed.isObject()) return std::nullopt;
-
     LevelEntry e;
     e.levelID    = parsed["level_id"].asInt().unwrapOr(0);
     e.blueStars  = parsed["blue_stars"].asInt().unwrapOr(0);
@@ -282,14 +268,10 @@ static std::optional<LevelEntry> parseOneLevelJson(std::string const& jsonStr) {
     e.sentBy     = parsed["sent_by"].asString().unwrapOr("");
     e.sentAt     = parsed["sent_at"].asInt().unwrapOr(0);
     e.ratedAt    = parsed["rated_at"].asInt().unwrapOr(0);
-
     if (e.levelID <= 0) return std::nullopt;
     return e;
 }
 
-// ────────────────────────────────────────────────────────────
-//  SQL запросы
-// ────────────────────────────────────────────────────────────
 static void loadAdminsFromDb() {
     runSql(
         "SELECT COALESCE(json_group_array(lower(username)),'[]') AS data "
@@ -445,7 +427,6 @@ static void awardStarsForLevel(
     std::string const& username
 ) {
     if (username.empty() || levelID <= 0 || blueStars <= 0) return;
-
     runSql(
         "SELECT COUNT(*) FROM completed_levels WHERE username='" +
         escapeSql(lower(username)) + "' AND level_id=" + std::to_string(levelID) + ";",
@@ -499,9 +480,6 @@ static int64_t getLevelID(GJGameLevel* l) {
     return l ? (int64_t)l->m_levelID : -1;
 }
 
-// ────────────────────────────────────────────────────────────
-//  GD-стиль иконки
-// ────────────────────────────────────────────────────────────
 static CCSprite* makeRateTypeIcon(std::string const& rt, float scale = 1.f) {
     const char* frame = "GJ_starsIcon_001.png";
     if      (rt == "featured")  frame = "GJ_featuredCoin_001.png";
@@ -594,7 +572,6 @@ private:
         int64_t id = 0;
         try { id = std::stoll(text); } catch (...) { return; }
         if (id <= 0) return;
-
         deleteRatedFromDb(id, [](bool ok, std::string const& msg) {
             toast(msg, ok ? NotificationIcon::Success : NotificationIcon::Error);
         });
@@ -660,7 +637,7 @@ private:
         menu->setPosition({ 0.f, 0.f });
         this->addChild(menu, 2);
 
-        // ── Stars ──
+        // Stars
         auto* starsTitle = CCLabelBMFont::create("Blue Stars", "bigFont.fnt");
         starsTitle->setScale(0.45f);
         starsTitle->setPosition({ cx, cy + 95.f });
@@ -686,7 +663,7 @@ private:
         plusBtn->setPosition({ cx + 38.f, cy + 63.f });
         menu->addChild(plusBtn);
 
-        // ── Difficulty ──
+        // Difficulty
         auto* diffTitle = CCLabelBMFont::create("Difficulty", "bigFont.fnt");
         diffTitle->setScale(0.45f);
         diffTitle->setPosition({ cx, cy + 25.f });
@@ -699,7 +676,7 @@ private:
         m_diffBtn->setPosition({ cx, cy - 8.f });
         menu->addChild(m_diffBtn);
 
-        // ── Rate type ──
+        // Rate type
         auto* typeTitle = CCLabelBMFont::create("Rate Type", "bigFont.fnt");
         typeTitle->setScale(0.45f);
         typeTitle->setPosition({ cx, cy - 45.f });
@@ -712,7 +689,7 @@ private:
         m_typeBtn->setPosition({ cx, cy - 78.f });
         menu->addChild(m_typeBtn);
 
-        // ── Кнопки ──
+        // Buttons
         auto* cancelBtn = CCMenuItemSpriteExtra::create(
             ButtonSprite::create("Cancel", "goldFont.fnt", "GJ_button_06.png", 0.7f),
             this, menu_selector(AdminRatePopup::onCancel));
@@ -792,7 +769,6 @@ private:
         auto win = CCDirector::get()->getWinSize();
         float cx = win.width / 2.f;
 
-        // ── Вкладки ──
         auto* tabMenu = CCMenu::create();
         tabMenu->setPosition({ cx, win.height - 40.f });
         tabMenu->setZOrder(5);
@@ -812,12 +788,10 @@ private:
         m_tabBtns[1] = makeTab("Recent", Tab::Recent,    0.f);
         m_tabBtns[2] = makeTab("Top",    Tab::Top,     120.f);
 
-        // ── Список ──
         m_listRoot = CCNode::create();
         m_listRoot->setPosition({ cx, win.height / 2.f });
         this->addChild(m_listRoot, 3);
 
-        // ── Статус ──
         m_statusLabel = CCLabelBMFont::create("", "goldFont.fnt");
         m_statusLabel->setScale(0.32f);
         m_statusLabel->setPosition({ cx, 52.f });
@@ -830,7 +804,6 @@ private:
         m_pageLabel->setZOrder(5);
         this->addChild(m_pageLabel);
 
-        // ── Навигация ──
         auto* navMenu = CCMenu::create();
         navMenu->setPosition({ cx, 20.f });
         navMenu->setZOrder(5);
@@ -855,7 +828,6 @@ private:
         refreshBtn->setPositionX(0.f);
         navMenu->addChild(refreshBtn);
 
-        // ── Delete (только админы) ──
         if (isAdmin()) {
             auto* delMenu = CCMenu::create();
             delMenu->setPosition({ win.width - 50.f, 20.f });
@@ -966,12 +938,14 @@ private:
             rowMenu->setPosition({ -listW / 2.f + 58.f, y });
             m_listRoot->addChild(rowMenu, 3);
 
+            // ← ИСПРАВЛЕНО: CCMenuItemSpriteExtra вместо CCMenuItemLabel
             auto* nameLblRaw = CCLabelBMFont::create(nameStr.c_str(), "bigFont.fnt");
             nameLblRaw->setScale(0.28f);
             nameLblRaw->setColor(ccc3(255, 255, 255));
 
-            auto* nameBtn = CCMenuItemLabel::create(
-                nameLblRaw, this, menu_selector(CustomRatesLayer::onLevelRowPressed));
+            auto* nameBtn = CCMenuItemSpriteExtra::create(
+                nameLblRaw, this,
+                menu_selector(CustomRatesLayer::onLevelRowPressed));
             nameBtn->setTag((int)e.levelID);
             rowMenu->addChild(nameBtn);
 
@@ -1146,7 +1120,6 @@ class $modify(CRInfoLayer, InfoLayer) {
         if (levelID <= 0) return true;
 
         auto win = CCDirector::get()->getWinSize();
-
         auto* label = CCLabelBMFont::create("", "goldFont.fnt");
         label->setScale(0.35f);
         label->setColor(ccc3(100, 200, 255));
