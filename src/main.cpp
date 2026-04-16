@@ -38,6 +38,9 @@
 
 using namespace geode::prelude;
 
+// Алиас для удобства
+using WebTask = Task<Result<web::WebResponse>>;
+
 namespace cr {
 
 static constexpr char const* kTursoUrlRaw =
@@ -175,13 +178,13 @@ static std::string makePipelineBody(std::string const& sql) {
            escapeJson(sql) + "\"}}]}";
 }
 
-// Безопасный способ получить вектор из Result<vector&>
 static std::vector<matjson::Value> safeArray(matjson::Value const& val) {
     if (!val.isArray()) return {};
     auto res = val.asArray();
     if (!res) return {};
-    // Копируем — это безопасно, т.к. Result хранит reference
-    return std::vector<matjson::Value>(res.unwrap().begin(), res.unwrap().end());
+    std::vector<matjson::Value> out;
+    for (auto const& v : res.unwrap()) out.push_back(v);
+    return out;
 }
 
 static std::optional<std::string> extractFirstString(matjson::Value const& root) {
@@ -215,10 +218,10 @@ static std::optional<std::string> extractFirstString(matjson::Value const& root)
 }
 
 // ────────────────────────────────────────────────────────────
-//  SqlTask — живёт на куче, сам себя удаляет
+//  SqlTask — HTTP запрос, живёт на куче
 // ────────────────────────────────────────────────────────────
 struct SqlTask {
-    EventListener<web::WebTask> listener;
+    EventListener<WebTask> listener;
     std::function<void(matjson::Value const&)> onOk;
     std::function<void(std::string const&)>    onErr;
     bool done = false;
@@ -237,17 +240,18 @@ struct SqlTask {
         req.header("Content-Type",  "application/json");
         req.bodyString(makePipelineBody(sql));
 
-        t->listener.bind([t](web::WebTask::Event* ev) {
+        t->listener.bind([t](WebTask::Event* ev) {
             if (t->done) return;
             if (auto* res = ev->getValue()) {
                 t->done = true;
-                if (res->ok()) {
-                    auto text   = res->string().unwrapOr("{}");
-                    auto parsed = matjson::parse(text).unwrapOr(matjson::Value());
+                if (res->isOk()) {
+                    auto& webRes = res->unwrap();
+                    auto text    = webRes.string().unwrapOr("{}");
+                    auto parsed  = matjson::parse(text).unwrapOr(matjson::Value());
                     if (t->onOk) t->onOk(parsed);
                 } else {
-                    auto text = res->string().unwrapOr("Request failed");
-                    if (t->onErr) t->onErr(text);
+                    auto err = res->unwrapErr();
+                    if (t->onErr) t->onErr(err);
                 }
                 delete t;
             } else if (ev->isCancelled()) {
@@ -580,39 +584,32 @@ private:
         if (!CCLayer::init()) return false;
 
         auto win = CCDirector::get()->getWinSize();
+        float cx = win.width  / 2.f;
+        float cy = win.height / 2.f;
 
-        // Затемнение фона
         auto* bg = CCLayerColor::create(ccc4(0, 0, 0, 150));
         this->addChild(bg, 0);
 
-        // Панель
         auto* panel = CCScale9Sprite::create("GJ_square01.png");
         panel->setContentSize({ 280.f, 160.f });
-        panel->setPosition({ win.width / 2.f, win.height / 2.f });
+        panel->setPosition({ cx, cy });
         this->addChild(panel, 1);
 
-        float cx = win.width / 2.f;
-        float cy = win.height / 2.f;
-
-        // Заголовок
         auto* title = CCLabelBMFont::create("Remove Rating", "goldFont.fnt");
         title->setScale(0.7f);
         title->setPosition({ cx, cy + 55.f });
         this->addChild(title, 2);
 
-        // Подпись
         auto* label = CCLabelBMFont::create("Enter Level ID:", "bigFont.fnt");
         label->setScale(0.45f);
         label->setPosition({ cx, cy + 20.f });
         this->addChild(label, 2);
 
-        // Ввод
         m_input = geode::TextInput::create(200.f, "Level ID");
         m_input->setFilter("0123456789");
         m_input->setPosition({ cx, cy - 15.f });
         this->addChild(m_input, 2);
 
-        // Кнопки
         auto* menu = CCMenu::create();
         menu->setPosition({ 0.f, 0.f });
         this->addChild(menu, 2);
@@ -647,7 +644,7 @@ private:
 
     void onConfirm(CCObject*) {
         if (!m_input) return;
-        std::string text = m_input->getString();
+        std::string text = std::string(m_input->getString());
         if (text.empty()) return;
 
         int64_t levelID = 0;
@@ -685,10 +682,10 @@ public:
 // ════════════════════════════════════════════════════════════
 class AdminRatePopup : public CCLayer {
 private:
-    int64_t     m_levelID   = 0;
-    int         m_stars     = 1;
-    int         m_diffIdx   = 2; // normal
-    int         m_typeIdx   = 0; // star
+    int64_t     m_levelID  = 0;
+    int         m_stars    = 1;
+    int         m_diffIdx  = 2;
+    int         m_typeIdx  = 0;
 
     CCLabelBMFont*         m_starsLabel = nullptr;
     CCMenuItemSpriteExtra* m_diffBtn    = nullptr;
@@ -708,20 +705,17 @@ private:
         m_levelID = levelID;
 
         auto win = CCDirector::get()->getWinSize();
-        float cx = win.width / 2.f;
+        float cx = win.width  / 2.f;
         float cy = win.height / 2.f;
 
-        // Затемнение
         auto* bg = CCLayerColor::create(ccc4(0, 0, 0, 150));
         this->addChild(bg, 0);
 
-        // Панель
         auto* panel = CCScale9Sprite::create("GJ_square01.png");
         panel->setContentSize({ 300.f, 290.f });
         panel->setPosition({ cx, cy });
         this->addChild(panel, 1);
 
-        // Заголовок
         auto* title = CCLabelBMFont::create("Rate Level", "goldFont.fnt");
         title->setScale(0.75f);
         title->setPosition({ cx, cy + 125.f });
@@ -731,7 +725,7 @@ private:
         btnMenu->setPosition({ 0.f, 0.f });
         this->addChild(btnMenu, 2);
 
-        // ── Stars ──
+        // Stars
         auto* starsLbl = CCLabelBMFont::create("Blue Stars", "bigFont.fnt");
         starsLbl->setScale(0.45f);
         starsLbl->setPosition({ cx, cy + 90.f });
@@ -757,7 +751,7 @@ private:
         plusBtn->setPosition({ cx + 38.f, cy + 58.f });
         btnMenu->addChild(plusBtn);
 
-        // ── Difficulty ──
+        // Difficulty
         auto* diffLbl = CCLabelBMFont::create("Difficulty", "bigFont.fnt");
         diffLbl->setScale(0.45f);
         diffLbl->setPosition({ cx, cy + 20.f });
@@ -771,7 +765,7 @@ private:
         m_diffBtn->setPosition({ cx, cy - 12.f });
         btnMenu->addChild(m_diffBtn);
 
-        // ── Rate type ──
+        // Rate type
         auto* typeLbl = CCLabelBMFont::create("Rate Type", "bigFont.fnt");
         typeLbl->setScale(0.45f);
         typeLbl->setPosition({ cx, cy - 48.f });
@@ -785,7 +779,7 @@ private:
         m_typeBtn->setPosition({ cx, cy - 78.f });
         btnMenu->addChild(m_typeBtn);
 
-        // ── Кнопки ──
+        // Buttons
         auto* cancelSpr = ButtonSprite::create(
             "Cancel", "goldFont.fnt", "GJ_button_06.png", 0.7f);
         auto* cancelBtn = CCMenuItemSpriteExtra::create(
@@ -881,13 +875,12 @@ private:
     std::array<CCMenuItemSpriteExtra*, 3> m_tabBtns{ nullptr, nullptr, nullptr };
 
     bool init() {
-        // GJDropDownLayer::init принимает только title
         if (!GJDropDownLayer::init("Custom Rates")) return false;
 
         auto win = CCDirector::get()->getWinSize();
         float cx = win.width / 2.f;
 
-        // ── Вкладки ──
+        // Вкладки
         auto* tabMenu = CCMenu::create();
         tabMenu->setPosition({ cx, win.height - 40.f });
         tabMenu->setZOrder(5);
@@ -908,12 +901,12 @@ private:
         m_tabBtns[1] = makeTab("Recent", Tab::Recent,    0.f);
         m_tabBtns[2] = makeTab("Top",    Tab::Top,     120.f);
 
-        // ── Список ──
+        // Список
         m_listRoot = CCNode::create();
         m_listRoot->setPosition({ cx, win.height / 2.f });
         this->addChild(m_listRoot, 3);
 
-        // ── Статус / страница ──
+        // Статус
         m_statusLabel = CCLabelBMFont::create("", "goldFont.fnt");
         m_statusLabel->setScale(0.32f);
         m_statusLabel->setPosition({ cx, 52.f });
@@ -926,7 +919,7 @@ private:
         m_pageLabel->setZOrder(5);
         this->addChild(m_pageLabel);
 
-        // ── Навигация ──
+        // Навигация
         auto* navMenu = CCMenu::create();
         navMenu->setPosition({ cx, 20.f });
         navMenu->setZOrder(5);
@@ -951,7 +944,7 @@ private:
         refreshBtn->setPositionX(0.f);
         navMenu->addChild(refreshBtn);
 
-        // ── Delete (только админы) ──
+        // Delete (только админы)
         if (isAdmin()) {
             auto* delMenu = CCMenu::create();
             delMenu->setPosition({ win.width - 50.f, 20.f });
@@ -1010,9 +1003,6 @@ private:
     void renderPage() {
         if (!m_listRoot) return;
         m_listRoot->removeAllChildrenWithCleanup(true);
-
-        auto win = CCDirector::get()->getWinSize();
-        float cx = win.width / 2.f;
 
         int total = std::max(1,
             (int)((m_entries.size() + kRowsPerPage - 1) / kRowsPerPage));
