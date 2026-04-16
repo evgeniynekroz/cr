@@ -38,8 +38,8 @@
 
 using namespace geode::prelude;
 
-// Алиас для удобства
-using WebTask = Task<Result<web::WebResponse>>;
+// Алиас для HTTP-запросов с явным указанием namespace
+using WebTask = geode::Task<geode::Result<geode::web::WebResponse>>;
 
 namespace cr {
 
@@ -97,9 +97,6 @@ static std::unordered_set<std::string> g_admins = {
 };
 static std::unordered_map<int64_t, std::string> g_nameCache;
 
-// ────────────────────────────────────────────────────────────
-//  Утилиты
-// ────────────────────────────────────────────────────────────
 static std::string lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
         [](unsigned char c){ return (char)std::tolower(c); });
@@ -166,9 +163,6 @@ static void toast(std::string const& msg,
     Notification::create(msg.c_str(), icon)->show();
 }
 
-// ────────────────────────────────────────────────────────────
-//  HTTP helpers
-// ────────────────────────────────────────────────────────────
 static std::string pipelineUrl() {
     return g_tursoUrl + "/v2/pipeline";
 }
@@ -182,9 +176,7 @@ static std::vector<matjson::Value> safeArray(matjson::Value const& val) {
     if (!val.isArray()) return {};
     auto res = val.asArray();
     if (!res) return {};
-    std::vector<matjson::Value> out;
-    for (auto const& v : res.unwrap()) out.push_back(v);
-    return out;
+    return std::vector<matjson::Value>(res.unwrap().begin(), res.unwrap().end());
 }
 
 static std::optional<std::string> extractFirstString(matjson::Value const& root) {
@@ -204,24 +196,19 @@ static std::optional<std::string> extractFirstString(matjson::Value const& root)
 
     if (cell.isString())
         return cell.asString().unwrapOr("");
-
     if (cell.isObject()) {
         auto v = cell["value"];
         if (v.isString()) return v.asString().unwrapOr("");
         if (v.isNumber()) return std::to_string(v.asInt().unwrapOr(0));
     }
-
     if (cell.isNumber())
         return std::to_string(cell.asInt().unwrapOr(0));
 
     return std::nullopt;
 }
 
-// ────────────────────────────────────────────────────────────
-//  SqlTask — HTTP запрос, живёт на куче
-// ────────────────────────────────────────────────────────────
 struct SqlTask {
-    EventListener<WebTask> listener;
+    geode::EventListener<WebTask> listener;
     std::function<void(matjson::Value const&)> onOk;
     std::function<void(std::string const&)>    onErr;
     bool done = false;
@@ -245,7 +232,7 @@ struct SqlTask {
             if (auto* res = ev->getValue()) {
                 t->done = true;
                 if (res->isOk()) {
-                    auto& webRes = res->unwrap();
+                    auto const& webRes = res->unwrap();
                     auto text    = webRes.string().unwrapOr("{}");
                     auto parsed  = matjson::parse(text).unwrapOr(matjson::Value());
                     if (t->onOk) t->onOk(parsed);
@@ -272,9 +259,6 @@ static void runSql(
     SqlTask::run(sql, std::move(onOk), std::move(onErr));
 }
 
-// ────────────────────────────────────────────────────────────
-//  Парсинг
-// ────────────────────────────────────────────────────────────
 static std::vector<LevelEntry> parseLevelsJson(std::string const& jsonStr) {
     std::vector<LevelEntry> out;
     auto parsed = matjson::parse(jsonStr).unwrapOr(matjson::Value());
@@ -317,9 +301,6 @@ static std::optional<LevelEntry> parseOneLevelJson(std::string const& jsonStr) {
     return e;
 }
 
-// ────────────────────────────────────────────────────────────
-//  SQL запросы
-// ────────────────────────────────────────────────────────────
 static void loadAdminsFromDb() {
     runSql(
         "SELECT COALESCE(json_group_array(lower(username)),'[]') AS data "
@@ -542,9 +523,6 @@ static int64_t getLevelID(GJGameLevel* l) {
     return l ? (int64_t)l->m_levelID : -1;
 }
 
-// ────────────────────────────────────────────────────────────
-//  GD-стиль иконки
-// ────────────────────────────────────────────────────────────
 static CCSprite* makeRateTypeIcon(std::string const& rt, float scale = 1.f) {
     const char* frame = "GJ_starsIcon_001.png";
     if      (rt == "featured")  frame = "GJ_featuredCoin_001.png";
@@ -573,16 +551,12 @@ static CCSprite* makeDifficultyIcon(std::string const& diff, float scale = 1.f) 
     return spr;
 }
 
-// ════════════════════════════════════════════════════════════
-//  DeleteLevelPopup
-// ════════════════════════════════════════════════════════════
 class DeleteLevelPopup : public CCLayer {
 private:
     geode::TextInput* m_input = nullptr;
 
     bool init() override {
         if (!CCLayer::init()) return false;
-
         auto win = CCDirector::get()->getWinSize();
         float cx = win.width  / 2.f;
         float cy = win.height / 2.f;
@@ -614,19 +588,13 @@ private:
         menu->setPosition({ 0.f, 0.f });
         this->addChild(menu, 2);
 
-        auto* cancelSpr = ButtonSprite::create(
-            "Cancel", "goldFont.fnt", "GJ_button_06.png", 0.7f);
-        auto* cancelBtn = CCMenuItemSpriteExtra::create(
-            cancelSpr, this,
-            menu_selector(DeleteLevelPopup::onCancel));
+        auto* cancelSpr = ButtonSprite::create("Cancel", "goldFont.fnt", "GJ_button_06.png", 0.7f);
+        auto* cancelBtn = CCMenuItemSpriteExtra::create(cancelSpr, this, menu_selector(DeleteLevelPopup::onCancel));
         cancelBtn->setPosition({ cx - 70.f, cy - 55.f });
         menu->addChild(cancelBtn);
 
-        auto* confirmSpr = ButtonSprite::create(
-            "Delete", "goldFont.fnt", "GJ_button_01.png", 0.7f);
-        auto* confirmBtn = CCMenuItemSpriteExtra::create(
-            confirmSpr, this,
-            menu_selector(DeleteLevelPopup::onConfirm));
+        auto* confirmSpr = ButtonSprite::create("Delete", "goldFont.fnt", "GJ_button_01.png", 0.7f);
+        auto* confirmBtn = CCMenuItemSpriteExtra::create(confirmSpr, this, menu_selector(DeleteLevelPopup::onConfirm));
         confirmBtn->setPosition({ cx + 70.f, cy - 55.f });
         menu->addChild(confirmBtn);
 
@@ -634,13 +602,8 @@ private:
         return true;
     }
 
-    void keyBackClicked() override {
-        this->removeFromParentAndCleanup(true);
-    }
-
-    void onCancel(CCObject*) {
-        this->removeFromParentAndCleanup(true);
-    }
+    void keyBackClicked() override { this->removeFromParentAndCleanup(true); }
+    void onCancel(CCObject*) { this->removeFromParentAndCleanup(true); }
 
     void onConfirm(CCObject*) {
         if (!m_input) return;
@@ -661,14 +624,10 @@ private:
 public:
     static DeleteLevelPopup* create() {
         auto* ret = new DeleteLevelPopup();
-        if (ret && ret->init()) {
-            ret->autorelease();
-            return ret;
-        }
+        if (ret && ret->init()) { ret->autorelease(); return ret; }
         CC_SAFE_DELETE(ret);
         return nullptr;
     }
-
     static void show() {
         auto* scene = CCDirector::get()->getRunningScene();
         if (!scene) return;
@@ -677,9 +636,6 @@ public:
     }
 };
 
-// ════════════════════════════════════════════════════════════
-//  AdminRatePopup
-// ════════════════════════════════════════════════════════════
 class AdminRatePopup : public CCLayer {
 private:
     int64_t     m_levelID  = 0;
@@ -725,7 +681,6 @@ private:
         btnMenu->setPosition({ 0.f, 0.f });
         this->addChild(btnMenu, 2);
 
-        // Stars
         auto* starsLbl = CCLabelBMFont::create("Blue Stars", "bigFont.fnt");
         starsLbl->setScale(0.45f);
         starsLbl->setPosition({ cx, cy + 90.f });
@@ -739,58 +694,45 @@ private:
 
         auto* minSpr = CCSprite::createWithSpriteFrameName("GJ_deleteBtn_001.png");
         minSpr->setScale(0.7f);
-        auto* minBtn = CCMenuItemSpriteExtra::create(
-            minSpr, this, menu_selector(AdminRatePopup::onStarMinus));
+        auto* minBtn = CCMenuItemSpriteExtra::create(minSpr, this, menu_selector(AdminRatePopup::onStarMinus));
         minBtn->setPosition({ cx - 38.f, cy + 58.f });
         btnMenu->addChild(minBtn);
 
         auto* plusSpr = CCSprite::createWithSpriteFrameName("GJ_plusBtn_001.png");
         plusSpr->setScale(0.7f);
-        auto* plusBtn = CCMenuItemSpriteExtra::create(
-            plusSpr, this, menu_selector(AdminRatePopup::onStarPlus));
+        auto* plusBtn = CCMenuItemSpriteExtra::create(plusSpr, this, menu_selector(AdminRatePopup::onStarPlus));
         plusBtn->setPosition({ cx + 38.f, cy + 58.f });
         btnMenu->addChild(plusBtn);
 
-        // Difficulty
         auto* diffLbl = CCLabelBMFont::create("Difficulty", "bigFont.fnt");
         diffLbl->setScale(0.45f);
         diffLbl->setPosition({ cx, cy + 20.f });
         this->addChild(diffLbl, 2);
 
         auto* diffIcon = makeDifficultyIcon(kDiffs[m_diffIdx], 0.85f);
-        if (!diffIcon)
-            diffIcon = CCSprite::createWithSpriteFrameName("difficulty_02_btn_001.png");
-        m_diffBtn = CCMenuItemSpriteExtra::create(
-            diffIcon, this, menu_selector(AdminRatePopup::onDiffCycle));
+        if (!diffIcon) diffIcon = CCSprite::createWithSpriteFrameName("difficulty_02_btn_001.png");
+        m_diffBtn = CCMenuItemSpriteExtra::create(diffIcon, this, menu_selector(AdminRatePopup::onDiffCycle));
         m_diffBtn->setPosition({ cx, cy - 12.f });
         btnMenu->addChild(m_diffBtn);
 
-        // Rate type
         auto* typeLbl = CCLabelBMFont::create("Rate Type", "bigFont.fnt");
         typeLbl->setScale(0.45f);
         typeLbl->setPosition({ cx, cy - 48.f });
         this->addChild(typeLbl, 2);
 
         auto* typeIcon = makeRateTypeIcon(kTypes[m_typeIdx], 0.85f);
-        if (!typeIcon)
-            typeIcon = CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
-        m_typeBtn = CCMenuItemSpriteExtra::create(
-            typeIcon, this, menu_selector(AdminRatePopup::onTypeCycle));
+        if (!typeIcon) typeIcon = CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
+        m_typeBtn = CCMenuItemSpriteExtra::create(typeIcon, this, menu_selector(AdminRatePopup::onTypeCycle));
         m_typeBtn->setPosition({ cx, cy - 78.f });
         btnMenu->addChild(m_typeBtn);
 
-        // Buttons
-        auto* cancelSpr = ButtonSprite::create(
-            "Cancel", "goldFont.fnt", "GJ_button_06.png", 0.7f);
-        auto* cancelBtn = CCMenuItemSpriteExtra::create(
-            cancelSpr, this, menu_selector(AdminRatePopup::onCancel));
+        auto* cancelSpr = ButtonSprite::create("Cancel", "goldFont.fnt", "GJ_button_06.png", 0.7f);
+        auto* cancelBtn = CCMenuItemSpriteExtra::create(cancelSpr, this, menu_selector(AdminRatePopup::onCancel));
         cancelBtn->setPosition({ cx - 75.f, cy - 120.f });
         btnMenu->addChild(cancelBtn);
 
-        auto* rateSpr = ButtonSprite::create(
-            "Rate!", "goldFont.fnt", "GJ_button_01.png", 0.7f);
-        auto* rateBtn = CCMenuItemSpriteExtra::create(
-            rateSpr, this, menu_selector(AdminRatePopup::onConfirm));
+        auto* rateSpr = ButtonSprite::create("Rate!", "goldFont.fnt", "GJ_button_01.png", 0.7f);
+        auto* rateBtn = CCMenuItemSpriteExtra::create(rateSpr, this, menu_selector(AdminRatePopup::onConfirm));
         rateBtn->setPosition({ cx + 75.f, cy - 120.f });
         btnMenu->addChild(rateBtn);
 
@@ -798,20 +740,12 @@ private:
         return true;
     }
 
-    void keyBackClicked() override {
-        this->removeFromParentAndCleanup(true);
-    }
-
-    void onCancel(CCObject*) {
-        this->removeFromParentAndCleanup(true);
-    }
+    void keyBackClicked() override { this->removeFromParentAndCleanup(true); }
+    void onCancel(CCObject*) { this->removeFromParentAndCleanup(true); }
 
     void onConfirm(CCObject*) {
         auto moderator = currentPlayerName();
-        rateLevelInDb(
-            m_levelID, m_stars,
-            kDiffs[m_diffIdx], kTypes[m_typeIdx],
-            moderator,
+        rateLevelInDb(m_levelID, m_stars, kDiffs[m_diffIdx], kTypes[m_typeIdx], moderator,
             [this](bool ok, std::string const& msg) {
                 toast(msg, ok ? NotificationIcon::Success : NotificationIcon::Error);
                 this->removeFromParentAndCleanup(true);
@@ -819,16 +753,9 @@ private:
         );
     }
 
-    void onStarMinus(CCObject*) {
-        if (m_stars > 1) { --m_stars; updateStarsLabel(); }
-    }
-    void onStarPlus(CCObject*) {
-        if (m_stars < 20) { ++m_stars; updateStarsLabel(); }
-    }
-    void updateStarsLabel() {
-        if (m_starsLabel)
-            m_starsLabel->setString(std::to_string(m_stars).c_str());
-    }
+    void onStarMinus(CCObject*) { if (m_stars > 1) { --m_stars; updateStarsLabel(); } }
+    void onStarPlus(CCObject*) { if (m_stars < 20) { ++m_stars; updateStarsLabel(); } }
+    void updateStarsLabel() { if (m_starsLabel) m_starsLabel->setString(std::to_string(m_stars).c_str()); }
     void onDiffCycle(CCObject*) {
         m_diffIdx = (m_diffIdx + 1) % 11;
         auto* icon = makeDifficultyIcon(kDiffs[m_diffIdx], 0.85f);
@@ -843,14 +770,10 @@ private:
 public:
     static AdminRatePopup* create(int64_t levelID) {
         auto* ret = new AdminRatePopup();
-        if (ret && ret->init(levelID)) {
-            ret->autorelease();
-            return ret;
-        }
+        if (ret && ret->init(levelID)) { ret->autorelease(); return ret; }
         CC_SAFE_DELETE(ret);
         return nullptr;
     }
-
     static void show(int64_t levelID) {
         auto* scene = CCDirector::get()->getRunningScene();
         if (!scene) return;
@@ -859,16 +782,12 @@ public:
     }
 };
 
-// ════════════════════════════════════════════════════════════
-//  CustomRatesLayer
-// ════════════════════════════════════════════════════════════
 class CustomRatesLayer : public GJDropDownLayer {
 private:
     Tab   m_tab    = Tab::Sent;
     int   m_page   = 0;
     int   m_reqSeq = 0;
     std::vector<LevelEntry> m_entries;
-
     CCNode*        m_listRoot    = nullptr;
     CCLabelBMFont* m_pageLabel   = nullptr;
     CCLabelBMFont* m_statusLabel = nullptr;
@@ -880,17 +799,14 @@ private:
         auto win = CCDirector::get()->getWinSize();
         float cx = win.width / 2.f;
 
-        // Вкладки
         auto* tabMenu = CCMenu::create();
         tabMenu->setPosition({ cx, win.height - 40.f });
         tabMenu->setZOrder(5);
         this->addChild(tabMenu);
 
         auto makeTab = [&](const char* text, Tab tab, float x) {
-            auto* spr = ButtonSprite::create(
-                text, "goldFont.fnt", "GJ_button_04.png", 0.65f);
-            auto* btn = CCMenuItemSpriteExtra::create(
-                spr, this, menu_selector(CustomRatesLayer::onTabPressed));
+            auto* spr = ButtonSprite::create(text, "goldFont.fnt", "GJ_button_04.png", 0.65f);
+            auto* btn = CCMenuItemSpriteExtra::create(spr, this, menu_selector(CustomRatesLayer::onTabPressed));
             btn->setTag((int)tab);
             btn->setPositionX(x);
             tabMenu->addChild(btn);
@@ -901,12 +817,10 @@ private:
         m_tabBtns[1] = makeTab("Recent", Tab::Recent,    0.f);
         m_tabBtns[2] = makeTab("Top",    Tab::Top,     120.f);
 
-        // Список
         m_listRoot = CCNode::create();
         m_listRoot->setPosition({ cx, win.height / 2.f });
         this->addChild(m_listRoot, 3);
 
-        // Статус
         m_statusLabel = CCLabelBMFont::create("", "goldFont.fnt");
         m_statusLabel->setScale(0.32f);
         m_statusLabel->setPosition({ cx, 52.f });
@@ -919,7 +833,6 @@ private:
         m_pageLabel->setZOrder(5);
         this->addChild(m_pageLabel);
 
-        // Навигация
         auto* navMenu = CCMenu::create();
         navMenu->setPosition({ cx, 20.f });
         navMenu->setZOrder(5);
@@ -927,34 +840,27 @@ private:
 
         auto* prevSpr = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
         prevSpr->setFlipX(true);
-        auto* prevBtn = CCMenuItemSpriteExtra::create(
-            prevSpr, this, menu_selector(CustomRatesLayer::onPrevPage));
+        auto* prevBtn = CCMenuItemSpriteExtra::create(prevSpr, this, menu_selector(CustomRatesLayer::onPrevPage));
         prevBtn->setPositionX(-60.f);
         navMenu->addChild(prevBtn);
 
         auto* nextSpr = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
-        auto* nextBtn = CCMenuItemSpriteExtra::create(
-            nextSpr, this, menu_selector(CustomRatesLayer::onNextPage));
+        auto* nextBtn = CCMenuItemSpriteExtra::create(nextSpr, this, menu_selector(CustomRatesLayer::onNextPage));
         nextBtn->setPositionX(60.f);
         navMenu->addChild(nextBtn);
 
         auto* refreshSpr = CCSprite::createWithSpriteFrameName("GJ_updateBtn_001.png");
-        auto* refreshBtn = CCMenuItemSpriteExtra::create(
-            refreshSpr, this, menu_selector(CustomRatesLayer::onRefresh));
+        auto* refreshBtn = CCMenuItemSpriteExtra::create(refreshSpr, this, menu_selector(CustomRatesLayer::onRefresh));
         refreshBtn->setPositionX(0.f);
         navMenu->addChild(refreshBtn);
 
-        // Delete (только админы)
         if (isAdmin()) {
             auto* delMenu = CCMenu::create();
             delMenu->setPosition({ win.width - 50.f, 20.f });
             delMenu->setZOrder(5);
             this->addChild(delMenu);
-
-            auto* delSpr = ButtonSprite::create(
-                "Delete", "goldFont.fnt", "GJ_button_06.png", 0.55f);
-            auto* delBtn = CCMenuItemSpriteExtra::create(
-                delSpr, this, menu_selector(CustomRatesLayer::onDeletePressed));
+            auto* delSpr = ButtonSprite::create("Delete", "goldFont.fnt", "GJ_button_06.png", 0.55f);
+            auto* delBtn = CCMenuItemSpriteExtra::create(delSpr, this, menu_selector(CustomRatesLayer::onDeletePressed));
             delMenu->addChild(delBtn);
         }
 
@@ -966,17 +872,15 @@ private:
         for (int i = 0; i < 3; ++i) {
             if (!m_tabBtns[i]) continue;
             bool active = (int)m_tab == i;
-            m_tabBtns[i]->setColor(
-                active ? ccc3(255, 220, 50) : ccc3(255, 255, 255));
+            m_tabBtns[i]->setColor(active ? ccc3(255, 220, 50) : ccc3(255, 255, 255));
         }
     }
 
     void loadTab(Tab tab) {
-        m_tab  = tab;
+        m_tab = tab;
         m_page = 0;
         updateTabVisuals();
         if (m_statusLabel) m_statusLabel->setString("Loading...");
-
         int token = ++m_reqSeq;
         this->retain();
 
@@ -984,9 +888,7 @@ private:
             [this, token](std::vector<LevelEntry> entries) {
                 if (token != m_reqSeq) { this->release(); return; }
                 m_entries = std::move(entries);
-                if (m_statusLabel)
-                    m_statusLabel->setString(
-                        ("Loaded: " + std::to_string(m_entries.size())).c_str());
+                if (m_statusLabel) m_statusLabel->setString(("Loaded: " + std::to_string(m_entries.size())).c_str());
                 this->release();
                 renderPage();
             },
@@ -1004,17 +906,12 @@ private:
         if (!m_listRoot) return;
         m_listRoot->removeAllChildrenWithCleanup(true);
 
-        int total = std::max(1,
-            (int)((m_entries.size() + kRowsPerPage - 1) / kRowsPerPage));
+        int total = std::max(1, (int)((m_entries.size() + kRowsPerPage - 1) / kRowsPerPage));
         m_page = std::clamp(m_page, 0, total - 1);
-
-        if (m_pageLabel)
-            m_pageLabel->setString(
-                ("Page " + std::to_string(m_page + 1) +
-                 "/" + std::to_string(total)).c_str());
+        if (m_pageLabel) m_pageLabel->setString(("Page " + std::to_string(m_page + 1) + "/" + std::to_string(total)).c_str());
 
         int start = m_page * kRowsPerPage;
-        int end   = std::min(start + kRowsPerPage, (int)m_entries.size());
+        int end = std::min(start + kRowsPerPage, (int)m_entries.size());
 
         if (start >= end) {
             auto* lbl = CCLabelBMFont::create("No entries yet.", "goldFont.fnt");
@@ -1033,15 +930,12 @@ private:
             int   rowIdx  = i - start;
             float y       = listH / 2.f - rowIdx * rowH;
 
-            auto* rowBg = CCLayerColor::create(
-                rowIdx % 2 == 0 ? ccc4(0,0,0,50) : ccc4(0,0,0,20),
-                listW, rowH - 2.f);
+            auto* rowBg = CCLayerColor::create(rowIdx % 2 == 0 ? ccc4(0,0,0,50) : ccc4(0,0,0,20), listW, rowH - 2.f);
             rowBg->setAnchorPoint({ 0.5f, 0.5f });
             rowBg->setPosition({ -listW / 2.f, y - rowH / 2.f });
             m_listRoot->addChild(rowBg, 1);
 
-            auto* rankLbl = CCLabelBMFont::create(
-                ("#" + std::to_string(i + 1)).c_str(), "bigFont.fnt");
+            auto* rankLbl = CCLabelBMFont::create(("#" + std::to_string(i + 1)).c_str(), "bigFont.fnt");
             rankLbl->setScale(0.26f);
             rankLbl->setColor(ccc3(255, 220, 50));
             rankLbl->setAnchorPoint({ 0.f, 0.5f });
@@ -1056,27 +950,19 @@ private:
                 }
             }
 
-            std::string nameStr = e.levelName.empty()
-                ? ("ID: " + std::to_string(e.levelID))
-                : e.levelName;
-
+            std::string nameStr = e.levelName.empty() ? ("ID: " + std::to_string(e.levelID)) : e.levelName;
             auto* rowMenu = CCMenu::create();
             rowMenu->setPosition({ -listW / 2.f + 58.f, y });
             m_listRoot->addChild(rowMenu, 3);
-
             auto* nameLblRaw = CCLabelBMFont::create(nameStr.c_str(), "bigFont.fnt");
             nameLblRaw->setScale(0.28f);
             nameLblRaw->setColor(ccc3(255, 255, 255));
-
-            auto* nameBtn = CCMenuItemLabel::create(
-                nameLblRaw, this,
-                menu_selector(CustomRatesLayer::onLevelRowPressed));
+            auto* nameBtn = CCMenuItemLabel::create(nameLblRaw, this, menu_selector(CustomRatesLayer::onLevelRowPressed));
             nameBtn->setTag((int)e.levelID);
             rowMenu->addChild(nameBtn);
 
             if (m_tab == Tab::Sent) {
-                std::string sentStr = e.sentBy.empty()
-                    ? "—" : ("by " + e.sentBy);
+                std::string sentStr = e.sentBy.empty() ? "—" : ("by " + e.sentBy);
                 auto* sentLbl = CCLabelBMFont::create(sentStr.c_str(), "bigFont.fnt");
                 sentLbl->setScale(0.20f);
                 sentLbl->setColor(ccc3(170, 170, 170));
@@ -1089,7 +975,6 @@ private:
                     typeIcon->setPosition({ listW / 2.f - 58.f, y });
                     m_listRoot->addChild(typeIcon, 2);
                 }
-
                 auto* starSpr = CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
                 if (starSpr) {
                     starSpr->setColor(ccc3(100, 200, 255));
@@ -1097,17 +982,13 @@ private:
                     starSpr->setPosition({ listW / 2.f - 36.f, y });
                     m_listRoot->addChild(starSpr, 2);
                 }
-
-                auto* starsLbl = CCLabelBMFont::create(
-                    std::to_string(e.blueStars).c_str(), "bigFont.fnt");
+                auto* starsLbl = CCLabelBMFont::create(std::to_string(e.blueStars).c_str(), "bigFont.fnt");
                 starsLbl->setScale(0.26f);
                 starsLbl->setColor(ccc3(100, 200, 255));
                 starsLbl->setAnchorPoint({ 0.f, 0.5f });
                 starsLbl->setPosition({ listW / 2.f - 24.f, y });
                 m_listRoot->addChild(starsLbl, 2);
-
-                auto* modLbl = CCLabelBMFont::create(
-                    (e.moderator.empty() ? "?" : e.moderator).c_str(), "bigFont.fnt");
+                auto* modLbl = CCLabelBMFont::create((e.moderator.empty() ? "?" : e.moderator).c_str(), "bigFont.fnt");
                 modLbl->setScale(0.18f);
                 modLbl->setColor(ccc3(90, 220, 255));
                 modLbl->setAnchorPoint({ 1.f, 0.5f });
@@ -1125,49 +1006,31 @@ private:
         loadTab(tab);
     }
 
-    void onPrevPage(CCObject*) {
-        if (m_page > 0) { --m_page; renderPage(); }
-    }
-
+    void onPrevPage(CCObject*) { if (m_page > 0) { --m_page; renderPage(); } }
     void onNextPage(CCObject*) {
-        int total = std::max(1,
-            (int)((m_entries.size() + kRowsPerPage - 1) / kRowsPerPage));
+        int total = std::max(1, (int)((m_entries.size() + kRowsPerPage - 1) / kRowsPerPage));
         if (m_page + 1 < total) { ++m_page; renderPage(); }
     }
-
     void onRefresh(CCObject*) { loadTab(m_tab); }
-
-    void onDeletePressed(CCObject*) {
-        if (!isAdmin()) return;
-        DeleteLevelPopup::show();
-    }
-
+    void onDeletePressed(CCObject*) { if (!isAdmin()) return; DeleteLevelPopup::show(); }
     void onLevelRowPressed(CCObject* sender) {
         auto* node = typeinfo_cast<CCNode*>(sender);
         if (!node) return;
         int64_t levelID = node->getTag();
         if (levelID <= 0) return;
-
         auto* level = GJGameLevel::create();
         level->m_levelID   = (int)levelID;
-        level->m_levelName = g_nameCache.count(levelID)
-            ? g_nameCache[levelID] : std::to_string(levelID);
-
+        level->m_levelName = g_nameCache.count(levelID) ? g_nameCache[levelID] : std::to_string(levelID);
         auto* scene = LevelInfoLayer::scene(level, false);
         CCDirector::get()->pushScene(CCTransitionFade::create(0.5f, scene));
     }
-
 public:
     static CustomRatesLayer* create() {
         auto* ret = new CustomRatesLayer();
-        if (ret && ret->init()) {
-            ret->autorelease();
-            return ret;
-        }
+        if (ret && ret->init()) { ret->autorelease(); return ret; }
         CC_SAFE_DELETE(ret);
         return nullptr;
     }
-
     static void show() {
         auto* scene = CCDirector::get()->getRunningScene();
         if (!scene) return;
@@ -1179,28 +1042,18 @@ public:
 
 } // namespace cr
 
-// ════════════════════════════════════════════════════════════
-//  ХУКИ
-// ════════════════════════════════════════════════════════════
-
 class $modify(CRCreatorLayer, CreatorLayer) {
     bool init() override {
         if (!CreatorLayer::init()) return false;
         cr::bootstrap();
-
         if (auto* menu = this->getChildByID("creator-buttons-menu")) {
-            if (auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(
-                    menu->getChildByID("featured-button"))) {
-                item->setTarget(
-                    this, menu_selector(CRCreatorLayer::onCustomRates));
+            if (auto* item = typeinfo_cast<CCMenuItemSpriteExtra*>(menu->getChildByID("featured-button"))) {
+                item->setTarget(this, menu_selector(CRCreatorLayer::onCustomRates));
             }
         }
         return true;
     }
-
-    void onCustomRates(CCObject*) {
-        cr::CustomRatesLayer::show();
-    }
+    void onCustomRates(CCObject*) { cr::CustomRatesLayer::show(); }
 };
 
 class $modify(CRLevelInfoLayer, LevelInfoLayer) {
@@ -1216,20 +1069,16 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
             menu->setPosition({ 24.f, win.height / 2.f });
             this->addChild(menu, 10);
         }
-
         if (menu->getChildByID("cr-rate-btn")) return true;
 
         auto* spr = CCSprite::createWithSpriteFrameName("GJ_reportBtn_001.png");
-        if (!spr)
-            spr = CCSprite::createWithSpriteFrameName("GJ_plusBtn_001.png");
+        if (!spr) spr = CCSprite::createWithSpriteFrameName("GJ_plusBtn_001.png");
         if (spr) spr->setScale(0.85f);
 
-        auto* btn = CCMenuItemSpriteExtra::create(
-            spr, this, menu_selector(CRLevelInfoLayer::onCRButton));
+        auto* btn = CCMenuItemSpriteExtra::create(spr, this, menu_selector(CRLevelInfoLayer::onCRButton));
         btn->setID("cr-rate-btn");
         menu->addChild(btn);
         menu->updateLayout();
-
         return true;
     }
 
@@ -1244,9 +1093,7 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
             auto sender = cr::currentPlayerName();
             cr::sendLevelToDb(levelID, sender,
                 [](bool ok, std::string const& msg) {
-                    cr::toast(msg, ok
-                        ? NotificationIcon::Success
-                        : NotificationIcon::Error);
+                    cr::toast(msg, ok ? NotificationIcon::Success : NotificationIcon::Error);
                 }
             );
         }
@@ -1262,7 +1109,6 @@ class $modify(CRInfoLayer, InfoLayer) {
         if (levelID <= 0) return true;
 
         auto win = CCDirector::get()->getWinSize();
-
         auto* label = CCLabelBMFont::create("", "goldFont.fnt");
         label->setScale(0.35f);
         label->setColor(ccc3(100, 200, 255));
@@ -1270,7 +1116,6 @@ class $modify(CRInfoLayer, InfoLayer) {
         label->setPosition({ win.width / 2.f, win.height - 14.f });
         label->setVisible(false);
         this->addChild(label, 100);
-
         label->retain();
 
         cr::fetchRatedMeta(levelID,
@@ -1280,8 +1125,7 @@ class $modify(CRInfoLayer, InfoLayer) {
                     label->release();
                     return;
                 }
-                auto text = "Rated by " + info->moderator +
-                            " (" + std::to_string(info->blueStars) + " stars)";
+                auto text = "Rated by " + info->moderator + " (" + std::to_string(info->blueStars) + " stars)";
                 label->setString(text.c_str());
                 label->setVisible(true);
                 label->release();
@@ -1291,7 +1135,6 @@ class $modify(CRInfoLayer, InfoLayer) {
                 label->release();
             }
         );
-
         return true;
     }
 };
@@ -1299,15 +1142,10 @@ class $modify(CRInfoLayer, InfoLayer) {
 class $modify(CRPlayLayer, PlayLayer) {
     void levelComplete() {
         PlayLayer::levelComplete();
-
-        if (!m_level) return;
-        if (m_isPracticeMode) return;
-
+        if (!m_level || m_isPracticeMode) return;
         auto levelID = cr::getLevelID(m_level);
         if (levelID <= 0) return;
-
         auto username = cr::currentPlayerName();
-
         cr::fetchRatedMeta(levelID,
             [levelID, username](std::optional<cr::LevelEntry> info) {
                 if (!info || info->blueStars <= 0) return;
@@ -1324,7 +1162,6 @@ class $modify(CRProfilePage, ProfilePage) {
         if (this->getChildByID("cr-blue-stars-label")) return;
 
         auto win = CCDirector::get()->getWinSize();
-
         auto* label = CCLabelBMFont::create("... blue stars", "goldFont.fnt");
         label->setScale(0.38f);
         label->setColor(ccc3(100, 200, 255));
