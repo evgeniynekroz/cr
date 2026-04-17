@@ -97,7 +97,7 @@ static bool        g_bootstrapped = false;
 static std::string g_tursoUrl;
 static std::string g_tursoToken;
 
-static std::unordered_set<std::string>  g_admins;
+static std::unordered_set<std::string>         g_admins;
 static std::unordered_map<int64_t,std::string> g_nameCache;
 static std::unordered_map<int64_t,LevelEntry>  g_rateCache;
 
@@ -117,12 +117,12 @@ static std::string lower(std::string s) {
 }
 static std::string escapeSql(std::string const& in) {
     std::string out; out.reserve(in.size()+8);
-    for (char c:in){ if(c=='\'') out+="''"; else out+=c; }
+    for(char c:in){ if(c=='\'') out+="''"; else out+=c; }
     return out;
 }
 static std::string escapeJson(std::string const& in) {
     std::string out; out.reserve(in.size()+8);
-    for (char c:in){
+    for(char c:in){
         switch(c){
             case '\\': out+="\\\\"; break;
             case '"':  out+="\\\""; break;
@@ -165,7 +165,7 @@ static int64_t getLevelID(GJGameLevel* l) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  Конвертация difficulty string → enum
+//  Difficulty helpers
 // ════════════════════════════════════════════════════════════
 
 static GJDifficulty diffStringToEnum(std::string const& d) {
@@ -174,7 +174,9 @@ static GJDifficulty diffStringToEnum(std::string const& d) {
     if(d=="hard")   return GJDifficulty::Hard;
     if(d=="harder") return GJDifficulty::Harder;
     if(d=="insane") return GJDifficulty::Insane;
-    if(d.find("demon")!=std::string::npos) return GJDifficulty::HardDemon;
+    // Demon — используем числовое значение 6
+    // чтобы не зависеть от названия enum в биндингах
+    if(d.find("demon")!=std::string::npos) return (GJDifficulty)6;
     return GJDifficulty::Auto;
 }
 static int demonSubType(std::string const& d) {
@@ -182,7 +184,7 @@ static int demonSubType(std::string const& d) {
     if(d=="med_demon")     return 2;
     if(d=="insane_demon")  return 3;
     if(d=="extreme_demon") return 4;
-    return 0;
+    return 0; // hard_demon
 }
 static bool isDemon(std::string const& d) {
     return d.find("demon")!=std::string::npos;
@@ -292,7 +294,7 @@ static void runSql(
 }
 
 // ════════════════════════════════════════════════════════════
-//  GD API — парсинг и загрузка уровней
+//  GD API
 // ════════════════════════════════════════════════════════════
 
 struct GDLevelInfo {
@@ -342,7 +344,6 @@ static std::unordered_map<int64_t,GDLevelInfo>
 
         GDLevelInfo info;
         info.name=kv[2];
-        // Поле 14 = лайки в GD протоколе
         if(kv.count(14))
             try{ info.likes=std::stoi(kv[14]); } catch(...){}
         out[id]=std::move(info);
@@ -411,7 +412,7 @@ static void fetchLevelNames(
 }
 
 // ════════════════════════════════════════════════════════════
-//  Парсинг БД ответов
+//  Парсинг БД
 // ════════════════════════════════════════════════════════════
 
 static LevelEntry parseSingleItem(matjson::Value const& item) {
@@ -695,7 +696,7 @@ static void applyRateToLevel(GJGameLevel* level, LevelEntry const& e) {
     level->m_stars       = e.blueStars;
     level->m_starRatings = e.blueStars;
     if(isDemon(e.difficulty)){
-        level->m_difficulty      = GJDifficulty::HardDemon;
+        level->m_difficulty      = (GJDifficulty)6;
         level->m_demonDifficulty = demonSubType(e.difficulty);
         level->m_demon           = 1;
     } else {
@@ -802,7 +803,7 @@ class LevelCell : public CCLayer {
 
         std::string nm=e.levelName.empty()
             ?("ID "+std::to_string(e.levelID)):e.levelName;
-        if(nm.size()>19) nm=nm.substr(0,18)+"…";
+        if(nm.size()>19) nm=nm.substr(0,18)+"...";
 
         auto* nl=CCLabelBMFont::create(nm.c_str(),"bigFont.fnt");
         nl->setScale(0.46f);
@@ -830,7 +831,6 @@ class LevelCell : public CCLayer {
 
             float rx=w-62.f;
             if(showLikes){
-                // Лайки
                 auto* ls=CCSprite::createWithSpriteFrameName(
                     "GJ_likesIcon_001.png");
                 if(ls){ ls->setScale(0.5f); ls->setPosition({rx,cy}); addChild(ls,2); }
@@ -894,10 +894,12 @@ class DeleteLevelPopup : public CCLayer {
         panel->setPosition({cx,cy}); addChild(panel,1);
 
         auto* title=CCLabelBMFont::create("Remove Rating","goldFont.fnt");
-        title->setScale(0.7f); title->setPosition({cx,cy+55.f}); addChild(title,2);
+        title->setScale(0.7f);
+        title->setPosition({cx,cy+55.f}); addChild(title,2);
 
         auto* lbl=CCLabelBMFont::create("Enter Level ID:","bigFont.fnt");
-        lbl->setScale(0.45f); lbl->setPosition({cx,cy+20.f}); addChild(lbl,2);
+        lbl->setScale(0.45f);
+        lbl->setPosition({cx,cy+20.f}); addChild(lbl,2);
 
         m_input=geode::TextInput::create(200.f,"Level ID");
         m_input->setFilter("0123456789");
@@ -978,14 +980,15 @@ class AdminRatePopup : public CCLayer {
         panel->setPosition({cx,cy}); addChild(panel,1);
 
         auto* title=CCLabelBMFont::create("Rate Level","goldFont.fnt");
-        title->setScale(0.75f); title->setPosition({cx,cy+130.f}); addChild(title,2);
+        title->setScale(0.75f);
+        title->setPosition({cx,cy+130.f}); addChild(title,2);
 
         auto* menu=CCMenu::create();
         menu->setPosition({0.f,0.f}); addChild(menu,2);
 
-        // Stars
         auto* st=CCLabelBMFont::create("Stars","bigFont.fnt");
-        st->setScale(0.45f); st->setPosition({cx,cy+95.f}); addChild(st,2);
+        st->setScale(0.45f);
+        st->setPosition({cx,cy+95.f}); addChild(st,2);
 
         m_starsLbl=CCLabelBMFont::create("1","bigFont.fnt");
         m_starsLbl->setScale(0.85f);
@@ -1004,9 +1007,9 @@ class AdminRatePopup : public CCLayer {
             ps,this,menu_selector(AdminRatePopup::onPlus));
         pb->setPosition({cx+38.f,cy+63.f}); menu->addChild(pb);
 
-        // Difficulty
         auto* dt=CCLabelBMFont::create("Difficulty","bigFont.fnt");
-        dt->setScale(0.45f); dt->setPosition({cx,cy+25.f}); addChild(dt,2);
+        dt->setScale(0.45f);
+        dt->setPosition({cx,cy+25.f}); addChild(dt,2);
 
         auto* di=makeDifficultyIcon(kDiffs[m_diffIdx],0.85f);
         if(!di) di=CCSprite::createWithSpriteFrameName("difficulty_02_btn_001.png");
@@ -1014,9 +1017,9 @@ class AdminRatePopup : public CCLayer {
             di,this,menu_selector(AdminRatePopup::onDiff));
         m_diffBtn->setPosition({cx,cy-8.f}); menu->addChild(m_diffBtn);
 
-        // Rate type
         auto* tt=CCLabelBMFont::create("Rate Type","bigFont.fnt");
-        tt->setScale(0.45f); tt->setPosition({cx,cy-45.f}); addChild(tt,2);
+        tt->setScale(0.45f);
+        tt->setPosition({cx,cy-45.f}); addChild(tt,2);
 
         auto* ti=makeRateTypeIcon(kTypes[m_typeIdx],0.85f);
         if(!ti) ti=CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
@@ -1024,7 +1027,6 @@ class AdminRatePopup : public CCLayer {
             ti,this,menu_selector(AdminRatePopup::onType));
         m_typeBtn->setPosition({cx,cy-78.f}); menu->addChild(m_typeBtn);
 
-        // Buttons
         auto* cb=CCMenuItemSpriteExtra::create(
             ButtonSprite::create("Cancel","goldFont.fnt","GJ_button_06.png",0.7f),
             this,menu_selector(AdminRatePopup::onCancel));
@@ -1041,23 +1043,25 @@ class AdminRatePopup : public CCLayer {
     void keyBackClicked() override { removeFromParentAndCleanup(true); }
     void onCancel(CCObject*)  { removeFromParentAndCleanup(true); }
     void onConfirm(CCObject*) {
-        rateLevelInDb(m_levelID,m_stars,
+        rateLevelInDb(
+            m_levelID,m_stars,
             kDiffs[m_diffIdx],kTypes[m_typeIdx],
             currentPlayerName(),
             [this](bool ok,std::string const& msg){
                 toast(msg,ok?NotificationIcon::Success:NotificationIcon::Error);
                 removeFromParentAndCleanup(true);
-            });
+            }
+        );
     }
     void onMinus(CCObject*) {
         if(m_stars>1){ --m_stars;
-            if(m_starsLbl) m_starsLbl->setString(
-                std::to_string(m_stars).c_str()); }
+            if(m_starsLbl)
+                m_starsLbl->setString(std::to_string(m_stars).c_str()); }
     }
     void onPlus(CCObject*) {
         if(m_stars<20){ ++m_stars;
-            if(m_starsLbl) m_starsLbl->setString(
-                std::to_string(m_stars).c_str()); }
+            if(m_starsLbl)
+                m_starsLbl->setString(std::to_string(m_stars).c_str()); }
     }
     void onDiff(CCObject*) {
         m_diffIdx=(m_diffIdx+1)%11;
@@ -1114,7 +1118,7 @@ protected:
             auto* s=CCSprite::createWithSpriteFrameName("GJ_sideArt_001.png");
             if(!s) continue;
             s->setFlipX(fx); s->setFlipY(fy);
-            s->setPosition({fx?win.width:0.f, fy?win.height:0.f});
+            s->setPosition({fx?win.width:0.f,fy?win.height:0.f});
             addChild(s,1);
         }
 
@@ -1150,29 +1154,28 @@ protected:
         m_pageLbl->setPosition({cx,ly-26.f});
         addChild(m_pageLbl,2);
 
-        // ── Стрелка влево — левый край, по центру вертикали ──
+        // Стрелка влево — левый край по центру
         auto* leftMenu=CCMenu::create();
         leftMenu->setPosition({0.f,0.f});
         addChild(leftMenu,3);
         auto* lArr=CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
-        if(lArr) lArr->setFlipX(true); // смотрит влево
+        if(lArr) lArr->setFlipX(true);
         auto* lBtn=CCMenuItemSpriteExtra::create(
             lArr,this,menu_selector(CRBaseScene::onPrev));
         lBtn->setPosition({28.f,cy});
         leftMenu->addChild(lBtn);
 
-        // ── Стрелка вправо — правый край, по центру вертикали ─
+        // Стрелка вправо — правый край по центру
         auto* rightMenu=CCMenu::create();
         rightMenu->setPosition({0.f,0.f});
         addChild(rightMenu,3);
         auto* rArr=CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
-        // не флипаем — смотрит вправо
         auto* rBtn=CCMenuItemSpriteExtra::create(
             rArr,this,menu_selector(CRBaseScene::onNext));
         rBtn->setPosition({win.width-28.f,cy});
         rightMenu->addChild(rBtn);
 
-        // ── Рефреш — правый нижний угол ──────────────────────
+        // Рефреш — правый нижний угол
         auto* refMenu=CCMenu::create();
         refMenu->setPosition({0.f,0.f});
         addChild(refMenu,3);
@@ -1182,7 +1185,7 @@ protected:
         rfBtn->setPosition({win.width-28.f,28.f});
         refMenu->addChild(rfBtn);
 
-        // ── Кнопка назад — левый верхний угол ────────────────
+        // Назад — левый верхний угол
         auto* backMenu=CCMenu::create();
         backMenu->setPosition({0.f,0.f});
         addChild(backMenu,3);
@@ -1349,7 +1352,7 @@ public:
 // ════════════════════════════════════════════════════════════
 
 class CRMainScene : public CCLayer {
-    bool init() {
+    bool init() override {
         if(!CCLayer::init()) return false;
         auto win=CCDirector::get()->getWinSize();
         float cx=win.width/2.f, cy=win.height/2.f;
@@ -1370,7 +1373,7 @@ class CRMainScene : public CCLayer {
             auto* s=CCSprite::createWithSpriteFrameName("GJ_sideArt_001.png");
             if(!s) continue;
             s->setFlipX(fx); s->setFlipY(fy);
-            s->setPosition({fx?win.width:0.f, fy?win.height:0.f});
+            s->setPosition({fx?win.width:0.f,fy?win.height:0.f});
             addChild(s,1);
         }
 
@@ -1387,10 +1390,10 @@ class CRMainScene : public CCLayer {
 
         struct B { const char* lbl; int tag; float x; float y; };
         std::vector<B> btns={
-            {"Sent",      0, -100.f,  55.f},
-            {"Recent",    1,  100.f,  55.f},
-            {"Random",    2, -100.f, -20.f},
-            {"Top Likes", 3,  100.f, -20.f},
+            {"Sent",      0,-100.f, 55.f},
+            {"Recent",    1, 100.f, 55.f},
+            {"Random",    2,-100.f,-20.f},
+            {"Top Likes", 3, 100.f,-20.f},
         };
         for(auto const& b:btns){
             auto* s=ButtonSprite::create(
@@ -1411,7 +1414,7 @@ class CRMainScene : public CCLayer {
             menu->addChild(db);
         }
 
-        // Кнопка назад
+        // Назад
         auto* bm=CCMenu::create();
         bm->setPosition({0.f,0.f}); addChild(bm,2);
         auto* bs=CCSprite::createWithSpriteFrameName("GJ_arrow_03_001.png");
@@ -1431,16 +1434,20 @@ class CRMainScene : public CCLayer {
         switch(node->getTag()){
             case 0:
                 CCDirector::get()->pushScene(CCTransitionFade::create(
-                    t,CRListScene::scene(CRListScene::Mode::Sent)));   break;
+                    t,CRListScene::scene(CRListScene::Mode::Sent)));
+                break;
             case 1:
                 CCDirector::get()->pushScene(CCTransitionFade::create(
-                    t,CRListScene::scene(CRListScene::Mode::Recent))); break;
+                    t,CRListScene::scene(CRListScene::Mode::Recent)));
+                break;
             case 2:
                 CCDirector::get()->pushScene(CCTransitionFade::create(
-                    t,CRListScene::scene(CRListScene::Mode::Random))); break;
+                    t,CRListScene::scene(CRListScene::Mode::Random)));
+                break;
             case 3:
                 CCDirector::get()->pushScene(CCTransitionFade::create(
-                    t,CRListScene::scene(CRListScene::Mode::TopLikes))); break;
+                    t,CRListScene::scene(CRListScene::Mode::TopLikes)));
+                break;
         }
     }
     void onDelete(CCObject*) { DeleteLevelPopup::show(); }
@@ -1522,14 +1529,11 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
                 // Применяем к GJGameLevel
                 cr::applyRateToLevel(m_level,*info);
 
-                // Обновляем иконку сложности — заменяем спрайт
+                // Обновляем иконку сложности
                 if(auto* diffNode=this->getChildByID("difficulty-sprite")){
-                    // Скрываем оригинал
                     diffNode->setVisible(false);
-                    // Если уже есть наш — удаляем
                     if(auto* old=this->getChildByID("cr-diff-icon"))
                         old->removeFromParent();
-                    // Создаём новый
                     auto* newDiff=cr::makeDifficultyIcon(info->difficulty,1.f);
                     if(newDiff){
                         newDiff->setID("cr-diff-icon");
@@ -1538,7 +1542,7 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
                     }
                 }
 
-                // "Rated by" — только на оцененных
+                // "Rated by" — только на оцененных уровнях
                 if(this->getChildByID("cr-rated-by")) return;
                 auto win=CCDirector::get()->getWinSize();
                 auto* lbl=CCLabelBMFont::create(
