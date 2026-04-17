@@ -6,12 +6,8 @@
 #include <Geode/binding/InfoLayer.hpp>
 #include <Geode/binding/LevelInfoLayer.hpp>
 #include <Geode/binding/CreatorLayer.hpp>
-#include <Geode/binding/ProfilePage.hpp>
-#include <Geode/binding/PlayLayer.hpp>
-#include <Geode/binding/GJUserScore.hpp>
 #include <Geode/binding/FLAlertLayer.hpp>
 #include <Geode/binding/ButtonSprite.hpp>
-#include <Geode/binding/DifficultySprite.hpp>
 
 #include <Geode/modify/LevelInfoLayer.hpp>
 #include <Geode/modify/InfoLayer.hpp>
@@ -83,7 +79,7 @@ static constexpr float kCellH       = 46.f;
 struct LevelEntry {
     int64_t     levelID   = 0;
     int         blueStars = 0;
-    int         likes     = 0;   // лайки с GD серверов
+    int         likes     = 0;
     std::string difficulty;
     std::string rateType;
     std::string moderator;
@@ -101,12 +97,9 @@ static bool        g_bootstrapped = false;
 static std::string g_tursoUrl;
 static std::string g_tursoToken;
 
-// Admins грузятся только из БД
-static std::unordered_set<std::string> g_admins;
-
-// Кэши
-static std::unordered_map<int64_t,std::string>   g_nameCache;
-static std::unordered_map<int64_t,LevelEntry>    g_rateCache;
+static std::unordered_set<std::string>  g_admins;
+static std::unordered_map<int64_t,std::string> g_nameCache;
+static std::unordered_map<int64_t,LevelEntry>  g_rateCache;
 
 using CancelToken = std::shared_ptr<std::atomic<bool>>;
 static CancelToken makeCancelToken() {
@@ -172,15 +165,15 @@ static int64_t getLevelID(GJGameLevel* l) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  Конвертация difficulty
+//  Конвертация difficulty string → enum
 // ════════════════════════════════════════════════════════════
 
 static GJDifficulty diffStringToEnum(std::string const& d) {
-    if(d=="easy")    return GJDifficulty::Easy;
-    if(d=="normal")  return GJDifficulty::Normal;
-    if(d=="hard")    return GJDifficulty::Hard;
-    if(d=="harder")  return GJDifficulty::Harder;
-    if(d=="insane")  return GJDifficulty::Insane;
+    if(d=="easy")   return GJDifficulty::Easy;
+    if(d=="normal") return GJDifficulty::Normal;
+    if(d=="hard")   return GJDifficulty::Hard;
+    if(d=="harder") return GJDifficulty::Harder;
+    if(d=="insane") return GJDifficulty::Insane;
     if(d.find("demon")!=std::string::npos) return GJDifficulty::HardDemon;
     return GJDifficulty::Auto;
 }
@@ -199,7 +192,7 @@ static bool isDemon(std::string const& d) {
 //  Иконки
 // ════════════════════════════════════════════════════════════
 
-static CCSprite* makeRateTypeIcon(std::string const& rt,float scale=1.f) {
+static CCSprite* makeRateTypeIcon(std::string const& rt, float scale=1.f) {
     const char* frame="GJ_starsIcon_001.png";
     if     (rt=="featured")  frame="GJ_featuredCoin_001.png";
     else if(rt=="epic")      frame="GJ_epicCoin_001.png";
@@ -209,7 +202,8 @@ static CCSprite* makeRateTypeIcon(std::string const& rt,float scale=1.f) {
     if(spr) spr->setScale(scale);
     return spr;
 }
-static CCSprite* makeDifficultyIcon(std::string const& diff,float scale=1.f) {
+
+static CCSprite* makeDifficultyIcon(std::string const& diff, float scale=1.f) {
     const char* frame="difficulty_00_btn_001.png";
     if     (diff=="easy")          frame="difficulty_01_btn_001.png";
     else if(diff=="normal")        frame="difficulty_02_btn_001.png";
@@ -237,6 +231,7 @@ static std::vector<matjson::Value> safeArray(matjson::Value const& val) {
     auto const& arr=res.unwrap();
     return {arr.begin(),arr.end()};
 }
+
 static std::optional<std::string> extractFirstString(matjson::Value const& root) {
     auto results=safeArray(root["results"]);
     if(results.empty()) return std::nullopt;
@@ -297,7 +292,7 @@ static void runSql(
 }
 
 // ════════════════════════════════════════════════════════════
-//  GD API — загрузка названий и лайков уровней
+//  GD API — парсинг и загрузка уровней
 // ════════════════════════════════════════════════════════════
 
 struct GDLevelInfo {
@@ -305,7 +300,6 @@ struct GDLevelInfo {
     int         likes = 0;
 };
 
-// Парсит ответ getGJLevels — возвращает map id→info
 static std::unordered_map<int64_t,GDLevelInfo>
     parseGDLevels(std::string const& text)
 {
@@ -341,14 +335,14 @@ static std::unordered_map<int64_t,GDLevelInfo>
             kv[ki]=val;
         }
 
-        // 1=id, 2=name, 14=likes
         if(!kv.count(1)||!kv.count(2)) continue;
         int64_t id=0;
         try{ id=std::stoll(kv[1]); } catch(...){ continue; }
         if(id<=0) continue;
 
         GDLevelInfo info;
-        info.name  = kv[2];
+        info.name=kv[2];
+        // Поле 14 = лайки в GD протоколе
         if(kv.count(14))
             try{ info.likes=std::stoi(kv[14]); } catch(...){}
         out[id]=std::move(info);
@@ -356,18 +350,12 @@ static std::unordered_map<int64_t,GDLevelInfo>
     return out;
 }
 
-// Загружает названия (и лайки) для списка ID
-// onDone вызывается в main thread
 static void fetchGDLevelInfo(
     std::vector<int64_t> ids,
     std::function<void(std::unordered_map<int64_t,GDLevelInfo>)> onDone,
     CancelToken cancel=nullptr
 ) {
-    if(ids.empty()){
-        if(onDone) onDone({});
-        return;
-    }
-    // GD принимает max 100
+    if(ids.empty()){ if(onDone) onDone({}); return; }
     if(ids.size()>100) ids.resize(100);
 
     std::string idList;
@@ -388,7 +376,7 @@ static void fetchGDLevelInfo(
             "https://www.boomlings.com/database/getGJLevels21.php");
         if(cancel&&cancel->load()) return;
         std::string text;
-        if(res.ok()){auto t=res.string();if(t.isOk()) text=t.unwrap();}
+        if(res.ok()){ auto t=res.string(); if(t.isOk()) text=t.unwrap(); }
         auto result=parseGDLevels(text);
         Loader::get()->queueInMainThread([result,onDone,cancel](){
             if(cancel&&cancel->load()) return;
@@ -397,7 +385,6 @@ static void fetchGDLevelInfo(
     }).detach();
 }
 
-// Упрощённая обёртка — только названия в кэш
 static void fetchLevelNames(
     std::vector<int64_t> ids,
     std::function<void()> onDone,
@@ -406,17 +393,16 @@ static void fetchLevelNames(
     std::vector<int64_t> missing;
     for(auto id:ids)
         if(id>0&&!g_nameCache.count(id)) missing.push_back(id);
-
     if(missing.empty()){ if(onDone) onDone(); return; }
 
+    std::vector<int64_t> missingCopy=missing;
     fetchGDLevelInfo(missing,
-        [missing,onDone,cancel]
+        [missingCopy,onDone,cancel]
         (std::unordered_map<int64_t,GDLevelInfo> info){
             if(cancel&&cancel->load()) return;
             for(auto const&[id,gi]:info)
                 g_nameCache[id]=gi.name;
-            // Заглушка для не найденных
-            for(auto id:missing)
+            for(auto id:missingCopy)
                 if(!g_nameCache.count(id))
                     g_nameCache[id]="ID "+std::to_string(id);
             if(onDone) onDone();
@@ -425,7 +411,7 @@ static void fetchLevelNames(
 }
 
 // ════════════════════════════════════════════════════════════
-//  Парсинг БД
+//  Парсинг БД ответов
 // ════════════════════════════════════════════════════════════
 
 static LevelEntry parseSingleItem(matjson::Value const& item) {
@@ -442,6 +428,7 @@ static LevelEntry parseSingleItem(matjson::Value const& item) {
         e.levelName=g_nameCache[e.levelID];
     return e;
 }
+
 static std::vector<LevelEntry> parseLevelsJson(std::string const& js) {
     std::vector<LevelEntry> out;
     auto parsed=matjson::parse(js).unwrapOr(matjson::Value());
@@ -452,6 +439,7 @@ static std::vector<LevelEntry> parseLevelsJson(std::string const& js) {
     }
     return out;
 }
+
 static std::optional<LevelEntry> parseOneLevelJson(std::string const& js) {
     auto parsed=matjson::parse(js).unwrapOr(matjson::Value());
     if(!parsed.isObject()) return std::nullopt;
@@ -558,13 +546,11 @@ static void fetchRandomLevels(
     );
 }
 
-// Топ по лайкам: грузим все rated из БД → запрашиваем GD → сортируем
 static void fetchTopByLikes(
     std::function<void(std::vector<LevelEntry>)> onOk,
     std::function<void(std::string const&)>      onErr=nullptr,
     CancelToken cancel=nullptr
 ) {
-    // Шаг 1: берём все rated уровни из нашей БД
     runSql(
         "SELECT COALESCE(json_group_array(json_object("
         "'level_id',level_id,'blue_stars',blue_stars,"
@@ -575,40 +561,31 @@ static void fetchTopByLikes(
             if(cancel&&cancel->load()) return;
             auto data=extractFirstString(root);
             if(!data){if(onErr)onErr("DB error");else onOk({});return;}
-
             auto entries=parseLevelsJson(*data);
             if(entries.empty()){ onOk({}); return; }
 
-            // Шаг 2: собираем ID
             std::vector<int64_t> ids;
             ids.reserve(entries.size());
             for(auto const& e:entries) ids.push_back(e.levelID);
 
-            // Шаг 3: запрашиваем GD — получаем names + likes
             fetchGDLevelInfo(ids,
                 [entries,onOk,cancel]
                 (std::unordered_map<int64_t,GDLevelInfo> gdInfo) mutable {
                     if(cancel&&cancel->load()) return;
-
-                    // Применяем имена и лайки
                     for(auto& e:entries){
                         if(gdInfo.count(e.levelID)){
                             auto const& gi=gdInfo[e.levelID];
                             e.levelName=gi.name;
                             e.likes    =gi.likes;
-                            // Обновляем кэш имён
                             g_nameCache[e.levelID]=gi.name;
                         } else if(g_nameCache.count(e.levelID)){
                             e.levelName=g_nameCache[e.levelID];
                         }
                     }
-
-                    // Шаг 4: сортируем по лайкам
                     std::sort(entries.begin(),entries.end(),
                         [](LevelEntry const& a,LevelEntry const& b){
                             return a.likes>b.likes;
                         });
-
                     onOk(std::move(entries));
                 },cancel
             );
@@ -652,7 +629,7 @@ static void fetchRatedMeta(
 }
 
 static void sendLevelToDb(
-    int64_t levelID,std::string const& sender,
+    int64_t levelID, std::string const& sender,
     std::function<void(bool,std::string const&)> onDone
 ) {
     runSql(
@@ -668,8 +645,7 @@ static void deleteSentFromDb(int64_t levelID,
     std::function<void(bool,std::string const&)> onDone=nullptr)
 {
     runSql(
-        "DELETE FROM sent_levels WHERE level_id="+
-        std::to_string(levelID)+";",
+        "DELETE FROM sent_levels WHERE level_id="+std::to_string(levelID)+";",
         [onDone](matjson::Value const&){if(onDone)onDone(true,"Removed.");},
         [onDone](std::string const& e){if(onDone)onDone(false,e);}
     );
@@ -680,15 +656,14 @@ static void deleteRatedFromDb(int64_t levelID,
 {
     g_rateCache.erase(levelID);
     runSql(
-        "DELETE FROM rated_levels WHERE level_id="+
-        std::to_string(levelID)+";",
+        "DELETE FROM rated_levels WHERE level_id="+std::to_string(levelID)+";",
         [onDone](matjson::Value const&){onDone(true,"Rating removed.");},
         [onDone](std::string const& e){onDone(false,e);}
     );
 }
 
 static void rateLevelInDb(
-    int64_t levelID,int blueStars,
+    int64_t levelID, int blueStars,
     std::string const& difficulty,
     std::string const& rateType,
     std::string const& moderator,
@@ -696,8 +671,7 @@ static void rateLevelInDb(
 ) {
     g_rateCache.erase(levelID);
     runSql(
-        "DELETE FROM sent_levels WHERE level_id="+
-        std::to_string(levelID)+";",
+        "DELETE FROM sent_levels WHERE level_id="+std::to_string(levelID)+";",
         [=](matjson::Value const&){
             runSql(
                 "INSERT OR REPLACE INTO rated_levels "
@@ -716,7 +690,7 @@ static void rateLevelInDb(
     );
 }
 
-static void applyRateToLevel(GJGameLevel* level,LevelEntry const& e) {
+static void applyRateToLevel(GJGameLevel* level, LevelEntry const& e) {
     if(!level) return;
     level->m_stars       = e.blueStars;
     level->m_starRatings = e.blueStars;
@@ -755,7 +729,7 @@ class CRScrollLayer : public CCLayer {
     CCPoint  m_last   = {};
     bool     m_drag   = false;
 
-    bool init(float w,float h){
+    bool init(float w, float h) {
         if(!CCLayer::init()) return false;
         m_viewW=w; m_viewH=h;
         setContentSize({w,h});
@@ -766,12 +740,12 @@ class CRScrollLayer : public CCLayer {
         setTouchMode(kCCTouchesOneByOne);
         return true;
     }
-    bool ccTouchBegan(CCTouch* t,CCEvent*) override {
+    bool ccTouchBegan(CCTouch* t, CCEvent*) override {
         auto l=convertTouchToNodeSpace(t);
         if(l.x<0||l.x>m_viewW||l.y<0||l.y>m_viewH) return false;
         m_last=l; m_drag=true; return true;
     }
-    void ccTouchMoved(CCTouch* t,CCEvent*) override {
+    void ccTouchMoved(CCTouch* t, CCEvent*) override {
         if(!m_drag||!m_cont) return;
         auto l=convertTouchToNodeSpace(t);
         float dy=l.y-m_last.y; m_last=l;
@@ -779,26 +753,26 @@ class CRScrollLayer : public CCLayer {
         float mx=std::max(0.f,m_totalH-m_viewH);
         m_cont->setPositionY(std::clamp(ny,0.f,mx));
     }
-    void ccTouchEnded(CCTouch*,CCEvent*) override { m_drag=false; }
-    void ccTouchCancelled(CCTouch* t,CCEvent* e) override { ccTouchEnded(t,e); }
+    void ccTouchEnded(CCTouch*, CCEvent*) override { m_drag=false; }
+    void ccTouchCancelled(CCTouch* t, CCEvent* e) override { ccTouchEnded(t,e); }
 
 public:
-    static CRScrollLayer* create(float w,float h){
+    static CRScrollLayer* create(float w, float h) {
         auto* r=new CRScrollLayer();
         if(r&&r->init(w,h)){ r->autorelease(); return r; }
         CC_SAFE_DELETE(r); return nullptr;
     }
-    void clearCells(){
+    void clearCells() {
         if(m_cont) m_cont->removeAllChildrenWithCleanup(true);
         m_totalH=0.f;
         if(m_cont) m_cont->setPositionY(0.f);
     }
-    void addCellAtY(CCLayer* cell,float y){
+    void addCellAtY(CCLayer* cell, float y) {
         if(!m_cont||!cell) return;
         cell->setPosition({0.f,y});
         m_cont->addChild(cell);
     }
-    void setTotalHeight(float h){ m_totalH=h; }
+    void setTotalHeight(float h) { m_totalH=h; }
 };
 
 // ════════════════════════════════════════════════════════════
@@ -808,7 +782,7 @@ public:
 class LevelCell : public CCLayer {
     LevelEntry m_entry;
 
-    bool init(LevelEntry const& e,bool isSent,bool showLikes,float w){
+    bool init(LevelEntry const& e, bool isSent, bool showLikes, float w) {
         if(!CCLayer::init()) return false;
         m_entry=e;
         setContentSize({w,kCellH});
@@ -855,16 +829,11 @@ class LevelCell : public CCLayer {
             addChild(ml,2);
 
             float rx=w-62.f;
-
             if(showLikes){
-                // Иконка лайка + число
+                // Лайки
                 auto* ls=CCSprite::createWithSpriteFrameName(
                     "GJ_likesIcon_001.png");
-                if(ls){
-                    ls->setScale(0.5f);
-                    ls->setPosition({rx,cy});
-                    addChild(ls,2);
-                }
+                if(ls){ ls->setScale(0.5f); ls->setPosition({rx,cy}); addChild(ls,2); }
                 auto* ll=CCLabelBMFont::create(
                     std::to_string(e.likes).c_str(),"bigFont.fnt");
                 ll->setScale(0.36f);
@@ -873,7 +842,6 @@ class LevelCell : public CCLayer {
                 ll->setPosition({rx+14.f,cy});
                 addChild(ll,2);
             } else {
-                // Тип рейта
                 auto* ti=makeRateTypeIcon(e.rateType,0.42f);
                 if(ti){ ti->setPosition({rx,cy}); addChild(ti,2); }
             }
@@ -888,7 +856,8 @@ class LevelCell : public CCLayer {
         menu->addChild(vb);
         return true;
     }
-    void onView(CCObject*){
+
+    void onView(CCObject*) {
         auto* lv=GJGameLevel::create();
         lv->m_levelID  =(int)m_entry.levelID;
         lv->m_levelName=m_entry.levelName.empty()
@@ -896,9 +865,10 @@ class LevelCell : public CCLayer {
         CCDirector::get()->pushScene(
             CCTransitionFade::create(0.5f,LevelInfoLayer::scene(lv,false)));
     }
+
 public:
     static LevelCell* create(
-        LevelEntry const& e,bool isSent,bool showLikes,float w)
+        LevelEntry const& e, bool isSent, bool showLikes, float w)
     {
         auto* r=new LevelCell();
         if(r&&r->init(e,isSent,showLikes,w)){ r->autorelease(); return r; }
@@ -912,36 +882,46 @@ public:
 
 class DeleteLevelPopup : public CCLayer {
     geode::TextInput* m_input=nullptr;
+
     bool init() override {
         if(!CCLayer::init()) return false;
         auto win=CCDirector::get()->getWinSize();
-        float cx=win.width/2.f,cy=win.height/2.f;
+        float cx=win.width/2.f, cy=win.height/2.f;
+
         addChild(CCLayerColor::create(ccc4(0,0,0,150)),0);
         auto* panel=CCScale9Sprite::create("GJ_square01.png");
         panel->setContentSize({280.f,160.f});
         panel->setPosition({cx,cy}); addChild(panel,1);
+
         auto* title=CCLabelBMFont::create("Remove Rating","goldFont.fnt");
         title->setScale(0.7f); title->setPosition({cx,cy+55.f}); addChild(title,2);
+
         auto* lbl=CCLabelBMFont::create("Enter Level ID:","bigFont.fnt");
         lbl->setScale(0.45f); lbl->setPosition({cx,cy+20.f}); addChild(lbl,2);
+
         m_input=geode::TextInput::create(200.f,"Level ID");
         m_input->setFilter("0123456789");
         m_input->setPosition({cx,cy-15.f}); addChild(m_input,2);
+
         auto* menu=CCMenu::create();
         menu->setPosition({0.f,0.f}); addChild(menu,2);
+
         auto* cb=CCMenuItemSpriteExtra::create(
             ButtonSprite::create("Cancel","goldFont.fnt","GJ_button_06.png",0.7f),
             this,menu_selector(DeleteLevelPopup::onCancel));
         cb->setPosition({cx-70.f,cy-55.f}); menu->addChild(cb);
+
         auto* db=CCMenuItemSpriteExtra::create(
             ButtonSprite::create("Delete","goldFont.fnt","GJ_button_01.png",0.7f),
             this,menu_selector(DeleteLevelPopup::onConfirm));
         db->setPosition({cx+70.f,cy-55.f}); menu->addChild(db);
-        setKeypadEnabled(true); return true;
+
+        setKeypadEnabled(true);
+        return true;
     }
     void keyBackClicked() override { removeFromParentAndCleanup(true); }
     void onCancel(CCObject*) { removeFromParentAndCleanup(true); }
-    void onConfirm(CCObject*){
+    void onConfirm(CCObject*) {
         if(!m_input) return;
         std::string text=std::string(m_input->getString());
         if(text.empty()) return;
@@ -954,13 +934,14 @@ class DeleteLevelPopup : public CCLayer {
         deleteSentFromDb(id);
         removeFromParentAndCleanup(true);
     }
+
 public:
-    static DeleteLevelPopup* create(){
+    static DeleteLevelPopup* create() {
         auto* r=new DeleteLevelPopup();
         if(r&&r->init()){ r->autorelease(); return r; }
         CC_SAFE_DELETE(r); return nullptr;
     }
-    static void show(){
+    static void show() {
         auto* s=CCDirector::get()->getRunningScene();
         if(s){ auto* p=create(); if(p) s->addChild(p,99999); }
     }
@@ -972,36 +953,43 @@ public:
 
 class AdminRatePopup : public CCLayer {
     int64_t m_levelID=0;
-    int m_stars=1,m_diffIdx=2,m_typeIdx=0;
-    CCLabelBMFont* m_starsLbl=nullptr;
-    CCMenuItemSpriteExtra* m_diffBtn=nullptr;
-    CCMenuItemSpriteExtra* m_typeBtn=nullptr;
+    int     m_stars=1, m_diffIdx=2, m_typeIdx=0;
+    CCLabelBMFont*         m_starsLbl = nullptr;
+    CCMenuItemSpriteExtra* m_diffBtn  = nullptr;
+    CCMenuItemSpriteExtra* m_typeBtn  = nullptr;
 
-    static constexpr const char* kDiffs[]=
-        {"auto","easy","normal","hard","harder","insane",
-         "easy_demon","med_demon","hard_demon","insane_demon","extreme_demon"};
-    static constexpr const char* kTypes[]=
-        {"star","featured","epic","legendary","mythic"};
+    static constexpr const char* kDiffs[] = {
+        "auto","easy","normal","hard","harder","insane",
+        "easy_demon","med_demon","hard_demon","insane_demon","extreme_demon"
+    };
+    static constexpr const char* kTypes[] = {
+        "star","featured","epic","legendary","mythic"
+    };
 
-    bool init(int64_t id){
+    bool init(int64_t id) {
         if(!CCLayer::init()) return false;
         m_levelID=id;
         auto win=CCDirector::get()->getWinSize();
-        float cx=win.width/2.f,cy=win.height/2.f;
+        float cx=win.width/2.f, cy=win.height/2.f;
+
         addChild(CCLayerColor::create(ccc4(0,0,0,150)),0);
         auto* panel=CCScale9Sprite::create("GJ_square01.png");
         panel->setContentSize({300.f,300.f});
         panel->setPosition({cx,cy}); addChild(panel,1);
+
         auto* title=CCLabelBMFont::create("Rate Level","goldFont.fnt");
         title->setScale(0.75f); title->setPosition({cx,cy+130.f}); addChild(title,2);
+
         auto* menu=CCMenu::create();
         menu->setPosition({0.f,0.f}); addChild(menu,2);
 
-        auto* st=CCLabelBMFont::create("Blue Stars","bigFont.fnt");
+        // Stars
+        auto* st=CCLabelBMFont::create("Stars","bigFont.fnt");
         st->setScale(0.45f); st->setPosition({cx,cy+95.f}); addChild(st,2);
+
         m_starsLbl=CCLabelBMFont::create("1","bigFont.fnt");
         m_starsLbl->setScale(0.85f);
-        m_starsLbl->setColor(ccc3(100,200,255));
+        m_starsLbl->setColor(ccc3(255,220,50));
         m_starsLbl->setPosition({cx,cy+63.f}); addChild(m_starsLbl,2);
 
         auto* ms=CCSprite::createWithSpriteFrameName("GJ_deleteBtn_001.png");
@@ -1009,80 +997,93 @@ class AdminRatePopup : public CCLayer {
         auto* mb=CCMenuItemSpriteExtra::create(
             ms,this,menu_selector(AdminRatePopup::onMinus));
         mb->setPosition({cx-38.f,cy+63.f}); menu->addChild(mb);
+
         auto* ps=CCSprite::createWithSpriteFrameName("GJ_plusBtn_001.png");
         if(ps) ps->setScale(0.7f);
         auto* pb=CCMenuItemSpriteExtra::create(
             ps,this,menu_selector(AdminRatePopup::onPlus));
         pb->setPosition({cx+38.f,cy+63.f}); menu->addChild(pb);
 
+        // Difficulty
         auto* dt=CCLabelBMFont::create("Difficulty","bigFont.fnt");
         dt->setScale(0.45f); dt->setPosition({cx,cy+25.f}); addChild(dt,2);
+
         auto* di=makeDifficultyIcon(kDiffs[m_diffIdx],0.85f);
         if(!di) di=CCSprite::createWithSpriteFrameName("difficulty_02_btn_001.png");
         m_diffBtn=CCMenuItemSpriteExtra::create(
             di,this,menu_selector(AdminRatePopup::onDiff));
         m_diffBtn->setPosition({cx,cy-8.f}); menu->addChild(m_diffBtn);
 
+        // Rate type
         auto* tt=CCLabelBMFont::create("Rate Type","bigFont.fnt");
         tt->setScale(0.45f); tt->setPosition({cx,cy-45.f}); addChild(tt,2);
+
         auto* ti=makeRateTypeIcon(kTypes[m_typeIdx],0.85f);
         if(!ti) ti=CCSprite::createWithSpriteFrameName("GJ_starsIcon_001.png");
         m_typeBtn=CCMenuItemSpriteExtra::create(
             ti,this,menu_selector(AdminRatePopup::onType));
         m_typeBtn->setPosition({cx,cy-78.f}); menu->addChild(m_typeBtn);
 
+        // Buttons
         auto* cb=CCMenuItemSpriteExtra::create(
             ButtonSprite::create("Cancel","goldFont.fnt","GJ_button_06.png",0.7f),
             this,menu_selector(AdminRatePopup::onCancel));
         cb->setPosition({cx-75.f,cy-125.f}); menu->addChild(cb);
+
         auto* rb=CCMenuItemSpriteExtra::create(
             ButtonSprite::create("Rate!","goldFont.fnt","GJ_button_01.png",0.7f),
             this,menu_selector(AdminRatePopup::onConfirm));
         rb->setPosition({cx+75.f,cy-125.f}); menu->addChild(rb);
-        setKeypadEnabled(true); return true;
+
+        setKeypadEnabled(true);
+        return true;
     }
     void keyBackClicked() override { removeFromParentAndCleanup(true); }
-    void onCancel(CCObject*) { removeFromParentAndCleanup(true); }
-    void onConfirm(CCObject*){
-        rateLevelInDb(m_levelID,m_stars,kDiffs[m_diffIdx],kTypes[m_typeIdx],
-            currentPlayerName(),[this](bool ok,std::string const& msg){
+    void onCancel(CCObject*)  { removeFromParentAndCleanup(true); }
+    void onConfirm(CCObject*) {
+        rateLevelInDb(m_levelID,m_stars,
+            kDiffs[m_diffIdx],kTypes[m_typeIdx],
+            currentPlayerName(),
+            [this](bool ok,std::string const& msg){
                 toast(msg,ok?NotificationIcon::Success:NotificationIcon::Error);
                 removeFromParentAndCleanup(true);
             });
     }
-    void onMinus(CCObject*){
-        if(m_stars>1){--m_stars;
-            if(m_starsLbl) m_starsLbl->setString(std::to_string(m_stars).c_str());}
+    void onMinus(CCObject*) {
+        if(m_stars>1){ --m_stars;
+            if(m_starsLbl) m_starsLbl->setString(
+                std::to_string(m_stars).c_str()); }
     }
-    void onPlus(CCObject*){
-        if(m_stars<20){++m_stars;
-            if(m_starsLbl) m_starsLbl->setString(std::to_string(m_stars).c_str());}
+    void onPlus(CCObject*) {
+        if(m_stars<20){ ++m_stars;
+            if(m_starsLbl) m_starsLbl->setString(
+                std::to_string(m_stars).c_str()); }
     }
-    void onDiff(CCObject*){
+    void onDiff(CCObject*) {
         m_diffIdx=(m_diffIdx+1)%11;
         auto* i=makeDifficultyIcon(kDiffs[m_diffIdx],0.85f);
         if(i&&m_diffBtn) m_diffBtn->setNormalImage(i);
     }
-    void onType(CCObject*){
+    void onType(CCObject*) {
         m_typeIdx=(m_typeIdx+1)%5;
         auto* i=makeRateTypeIcon(kTypes[m_typeIdx],0.85f);
         if(i&&m_typeBtn) m_typeBtn->setNormalImage(i);
     }
+
 public:
-    static AdminRatePopup* create(int64_t id){
+    static AdminRatePopup* create(int64_t id) {
         auto* r=new AdminRatePopup();
         if(r&&r->init(id)){ r->autorelease(); return r; }
         CC_SAFE_DELETE(r); return nullptr;
     }
-    static void show(int64_t id){
+    static void show(int64_t id) {
         auto* s=CCDirector::get()->getRunningScene();
         if(s){ auto* p=create(id); if(p) s->addChild(p,99999); }
     }
 };
 
 // ════════════════════════════════════════════════════════════
-//  CRBaseScene — базовый класс для всех list-сцен
-//  Стрелки по бокам экрана, рефреш в правом нижнем углу
+//  CRBaseScene
 // ════════════════════════════════════════════════════════════
 
 class CRBaseScene : public CCLayer {
@@ -1097,7 +1098,7 @@ protected:
         auto win=CCDirector::get()->getWinSize();
         float cx=win.width/2.f, cy=win.height/2.f;
 
-        // ── Фон ─────────────────────────────────────────────
+        // Фон
         auto* bg=CCSprite::create("GJ_gradientBG.png");
         if(bg){
             bg->setScaleX(win.width/bg->getContentSize().width);
@@ -1106,24 +1107,24 @@ protected:
             bg->setColor(ccc3(0,102,255));
             addChild(bg,-1);
         }
-        // ── Углы ────────────────────────────────────────────
+
+        // Углы
         for(int fx=0;fx<2;++fx)
         for(int fy=0;fy<2;++fy){
             auto* s=CCSprite::createWithSpriteFrameName("GJ_sideArt_001.png");
             if(!s) continue;
             s->setFlipX(fx); s->setFlipY(fy);
-            s->setPosition({fx?win.width:0.f,fy?win.height:0.f});
+            s->setPosition({fx?win.width:0.f, fy?win.height:0.f});
             addChild(s,1);
         }
-        // ── Заголовок ────────────────────────────────────────
+
+        // Заголовок
         auto* tl=CCLabelBMFont::create(title,"goldFont.fnt");
         tl->setScale(0.85f);
         tl->setPosition({cx,win.height-28.f});
         addChild(tl,2);
 
-        // ── Рамка + скролл ───────────────────────────────────
-        // Список занимает пространство между стрелками
-        // Стрелки будут по 30px от края → отступ 50px с каждой стороны
+        // Рамка
         float lx=cx-kListW/2.f;
         float ly=cy-kListH/2.f+10.f;
 
@@ -1132,59 +1133,54 @@ protected:
         frame->setPosition({cx,cy+10.f});
         addChild(frame,1);
 
+        // Скролл
         m_scroll=CRScrollLayer::create(kListW,kListH);
         m_scroll->setPosition({lx,ly});
         addChild(m_scroll,2);
 
-        // ── Статус ───────────────────────────────────────────
+        // Статус
         m_statusLbl=CCLabelBMFont::create("Loading...","goldFont.fnt");
         m_statusLbl->setScale(0.28f);
         m_statusLbl->setPosition({cx,ly-14.f});
         addChild(m_statusLbl,2);
 
-        // ── Страница — по центру снизу ────────────────────────
+        // Страница
         m_pageLbl=CCLabelBMFont::create("Page 1/1","goldFont.fnt");
         m_pageLbl->setScale(0.28f);
         m_pageLbl->setPosition({cx,ly-26.f});
         addChild(m_pageLbl,2);
 
-        // ── Стрелка влево — левый край экрана ────────────────
-        // Позиционируем в абсолютных координатах через отдельное меню
+        // ── Стрелка влево — левый край, по центру вертикали ──
         auto* leftMenu=CCMenu::create();
         leftMenu->setPosition({0.f,0.f});
         addChild(leftMenu,3);
-
         auto* lArr=CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
-        // GJ_arrow_01 смотрит вправо → флипаем для "назад"
-        if(lArr) lArr->setFlipX(true);
+        if(lArr) lArr->setFlipX(true); // смотрит влево
         auto* lBtn=CCMenuItemSpriteExtra::create(
             lArr,this,menu_selector(CRBaseScene::onPrev));
-        // По левому краю, по центру вертикали
-        lBtn->setPosition({28.f, cy});
+        lBtn->setPosition({28.f,cy});
         leftMenu->addChild(lBtn);
 
-        // ── Стрелка вправо — правый край экрана ──────────────
+        // ── Стрелка вправо — правый край, по центру вертикали ─
         auto* rightMenu=CCMenu::create();
         rightMenu->setPosition({0.f,0.f});
         addChild(rightMenu,3);
-
         auto* rArr=CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
-        // Смотрит вправо — не флипаем
+        // не флипаем — смотрит вправо
         auto* rBtn=CCMenuItemSpriteExtra::create(
             rArr,this,menu_selector(CRBaseScene::onNext));
-        rBtn->setPosition({win.width-28.f, cy});
+        rBtn->setPosition({win.width-28.f,cy});
         rightMenu->addChild(rBtn);
 
         // ── Рефреш — правый нижний угол ──────────────────────
         auto* refMenu=CCMenu::create();
         refMenu->setPosition({0.f,0.f});
         addChild(refMenu,3);
-
         auto* rSpr=CCSprite::createWithSpriteFrameName("GJ_updateBtn_001.png");
-        auto* rBtn2=CCMenuItemSpriteExtra::create(
+        auto* rfBtn=CCMenuItemSpriteExtra::create(
             rSpr,this,menu_selector(CRBaseScene::onRefresh));
-        rBtn2->setPosition({win.width-28.f, 28.f});
-        refMenu->addChild(rBtn2);
+        rfBtn->setPosition({win.width-28.f,28.f});
+        refMenu->addChild(rfBtn);
 
         // ── Кнопка назад — левый верхний угол ────────────────
         auto* backMenu=CCMenu::create();
@@ -1200,7 +1196,7 @@ protected:
         return true;
     }
 
-    void updatePageLabel(int total){
+    void updatePageLabel(int total) {
         if(m_pageLbl)
             m_pageLbl->setString(
                 ("Page "+std::to_string(m_page+1)+"/"+
@@ -1210,12 +1206,12 @@ protected:
     virtual void onPrev(CCObject*)    {}
     virtual void onNext(CCObject*)    {}
     virtual void onRefresh(CCObject*) {}
-    void onBack(CCObject*){ CCDirector::get()->popScene(); }
+    void onBack(CCObject*) { CCDirector::get()->popScene(); }
     void keyBackClicked() override { CCDirector::get()->popScene(); }
 };
 
 // ════════════════════════════════════════════════════════════
-//  CRListScene — Sent / Recent / Random / TopLikes
+//  CRListScene
 // ════════════════════════════════════════════════════════════
 
 class CRListScene : public CRBaseScene {
@@ -1223,12 +1219,12 @@ public:
     enum class Mode { Sent, Recent, Random, TopLikes };
 
 private:
-    Mode   m_mode;
+    Mode   m_mode   = Mode::Sent;
     int    m_reqSeq = 0;
     CancelToken m_cancel;
     std::vector<LevelEntry> m_entries;
 
-    bool init(Mode mode){
+    bool init(Mode mode) {
         m_mode=mode;
         const char* title=
             mode==Mode::Sent    ?"Sent Levels":
@@ -1240,7 +1236,7 @@ private:
         return true;
     }
 
-    void loadData(){
+    void loadData() {
         if(m_statusLbl) m_statusLbl->setString("Loading...");
         if(m_cancel) m_cancel->store(true);
         m_cancel=makeCancelToken();
@@ -1248,7 +1244,6 @@ private:
         auto cancel=m_cancel;
         retain();
 
-        // Для TopLikes — отдельный путь
         if(m_mode==Mode::TopLikes){
             fetchTopByLikes(
                 [this,seq,cancel](std::vector<LevelEntry> entries){
@@ -1257,22 +1252,18 @@ private:
                     if(m_statusLbl)
                         m_statusLbl->setString(
                             ("Loaded: "+std::to_string(m_entries.size())).c_str());
-                    release();
-                    rebuildList();
+                    release(); rebuildList();
                 },
                 [this,seq,cancel](std::string const& err){
                     if(cancel->load()||seq!=m_reqSeq){ release(); return; }
                     m_entries.clear();
                     if(m_statusLbl) m_statusLbl->setString(err.c_str());
-                    release();
-                    rebuildList();
-                },
-                cancel
+                    release(); rebuildList();
+                },cancel
             );
             return;
         }
 
-        // Sent / Recent / Random
         auto onGot=[this,seq,cancel](std::vector<LevelEntry> entries){
             if(cancel->load()||seq!=m_reqSeq){ release(); return; }
             m_entries=std::move(entries);
@@ -1287,16 +1278,14 @@ private:
                 if(m_statusLbl)
                     m_statusLbl->setString(
                         ("Loaded: "+std::to_string(m_entries.size())).c_str());
-                release();
-                rebuildList();
+                release(); rebuildList();
             },cancel);
         };
         auto onErr=[this,seq,cancel](std::string const& err){
             if(cancel->load()||seq!=m_reqSeq){ release(); return; }
             m_entries.clear();
             if(m_statusLbl) m_statusLbl->setString(err.c_str());
-            release();
-            rebuildList();
+            release(); rebuildList();
         };
 
         switch(m_mode){
@@ -1307,7 +1296,7 @@ private:
         }
     }
 
-    void rebuildList(){
+    void rebuildList() {
         if(!m_scroll) return;
         m_scroll->clearCells();
         int total=std::max(1,(int)(
@@ -1345,8 +1334,9 @@ private:
         if(m_cancel) m_cancel->store(true);
         CRBaseScene::onExit();
     }
+
 public:
-    static CCScene* scene(Mode mode){
+    static CCScene* scene(Mode mode) {
         auto* sc=CCScene::create();
         auto* ly=new CRListScene();
         if(ly&&ly->init(mode)){ ly->autorelease(); sc->addChild(ly); }
@@ -1355,11 +1345,11 @@ public:
 };
 
 // ════════════════════════════════════════════════════════════
-//  CRMainScene — главный экран
+//  CRMainScene
 // ════════════════════════════════════════════════════════════
 
 class CRMainScene : public CCLayer {
-    bool init(){
+    bool init() {
         if(!CCLayer::init()) return false;
         auto win=CCDirector::get()->getWinSize();
         float cx=win.width/2.f, cy=win.height/2.f;
@@ -1373,32 +1363,34 @@ class CRMainScene : public CCLayer {
             bg->setColor(ccc3(0,102,255));
             addChild(bg,-1);
         }
+
         // Углы
         for(int fx=0;fx<2;++fx)
         for(int fy=0;fy<2;++fy){
             auto* s=CCSprite::createWithSpriteFrameName("GJ_sideArt_001.png");
             if(!s) continue;
             s->setFlipX(fx); s->setFlipY(fy);
-            s->setPosition({fx?win.width:0.f,fy?win.height:0.f});
+            s->setPosition({fx?win.width:0.f, fy?win.height:0.f});
             addChild(s,1);
         }
 
+        // Заголовок
         auto* tl=CCLabelBMFont::create("Custom Rates","goldFont.fnt");
         tl->setScale(0.9f);
         tl->setPosition({cx,win.height-30.f});
         addChild(tl,2);
 
-        // Кнопки по центру экрана
+        // Кнопки
         auto* menu=CCMenu::create();
         menu->setPosition({cx,cy});
         addChild(menu,2);
 
-        struct B{ const char* lbl; int tag; float x; float y; };
+        struct B { const char* lbl; int tag; float x; float y; };
         std::vector<B> btns={
-            {"Sent",     0, -100.f,  55.f},
-            {"Recent",   1,  100.f,  55.f},
-            {"Random",   2, -100.f, -20.f},
-            {"Top Likes",3,  100.f, -20.f},
+            {"Sent",      0, -100.f,  55.f},
+            {"Recent",    1,  100.f,  55.f},
+            {"Random",    2, -100.f, -20.f},
+            {"Top Likes", 3,  100.f, -20.f},
         };
         for(auto const& b:btns){
             auto* s=ButtonSprite::create(
@@ -1409,6 +1401,7 @@ class CRMainScene : public CCLayer {
             btn->setPosition({b.x,b.y});
             menu->addChild(btn);
         }
+
         if(isAdmin()){
             auto* ds=ButtonSprite::create(
                 "Delete","goldFont.fnt","GJ_button_06.png",0.7f);
@@ -1418,7 +1411,7 @@ class CRMainScene : public CCLayer {
             menu->addChild(db);
         }
 
-        // Назад
+        // Кнопка назад
         auto* bm=CCMenu::create();
         bm->setPosition({0.f,0.f}); addChild(bm,2);
         auto* bs=CCSprite::createWithSpriteFrameName("GJ_arrow_03_001.png");
@@ -1430,28 +1423,38 @@ class CRMainScene : public CCLayer {
         setKeypadEnabled(true);
         return true;
     }
-    void onBtn(CCObject* sender){
+
+    void onBtn(CCObject* sender) {
         auto* node=typeinfo_cast<CCNode*>(sender);
         if(!node) return;
         float t=0.3f;
         switch(node->getTag()){
-            case 0: CCDirector::get()->pushScene(CCTransitionFade::create(t,CRListScene::scene(CRListScene::Mode::Sent)));     break;
-            case 1: CCDirector::get()->pushScene(CCTransitionFade::create(t,CRListScene::scene(CRListScene::Mode::Recent)));   break;
-            case 2: CCDirector::get()->pushScene(CCTransitionFade::create(t,CRListScene::scene(CRListScene::Mode::Random)));   break;
-            case 3: CCDirector::get()->pushScene(CCTransitionFade::create(t,CRListScene::scene(CRListScene::Mode::TopLikes))); break;
+            case 0:
+                CCDirector::get()->pushScene(CCTransitionFade::create(
+                    t,CRListScene::scene(CRListScene::Mode::Sent)));   break;
+            case 1:
+                CCDirector::get()->pushScene(CCTransitionFade::create(
+                    t,CRListScene::scene(CRListScene::Mode::Recent))); break;
+            case 2:
+                CCDirector::get()->pushScene(CCTransitionFade::create(
+                    t,CRListScene::scene(CRListScene::Mode::Random))); break;
+            case 3:
+                CCDirector::get()->pushScene(CCTransitionFade::create(
+                    t,CRListScene::scene(CRListScene::Mode::TopLikes))); break;
         }
     }
-    void onDelete(CCObject*){ DeleteLevelPopup::show(); }
-    void onBack(CCObject*)  { CCDirector::get()->popScene(); }
+    void onDelete(CCObject*) { DeleteLevelPopup::show(); }
+    void onBack(CCObject*)   { CCDirector::get()->popScene(); }
     void keyBackClicked() override { CCDirector::get()->popScene(); }
+
 public:
-    static CCScene* scene(){
+    static CCScene* scene() {
         auto* sc=CCScene::create();
         auto* ly=new CRMainScene();
         if(ly&&ly->init()){ ly->autorelease(); sc->addChild(ly); }
         return sc;
     }
-    static void show(){
+    static void show() {
         CCDirector::get()->pushScene(
             CCTransitionFade::create(0.3f,scene()));
     }
@@ -1474,12 +1477,8 @@ class $modify(CRCreatorLayer, CreatorLayer) {
                     menu_selector(CRCreatorLayer::onCustomRates));
         return true;
     }
-    void onCustomRates(CCObject*){ cr::CRMainScene::show(); }
+    void onCustomRates(CCObject*) { cr::CRMainScene::show(); }
 };
-
-// ════════════════════════════════════════════════════════════
-//  LevelInfoLayer — сложность + "Rated by" из нашей БД
-// ════════════════════════════════════════════════════════════
 
 class $modify(CRLevelInfoLayer, LevelInfoLayer) {
     struct Fields { cr::CancelToken cancel; };
@@ -1523,15 +1522,23 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
                 // Применяем к GJGameLevel
                 cr::applyRateToLevel(m_level,*info);
 
-                // Обновляем DifficultySprite
-                if(auto* ds=typeinfo_cast<DifficultySprite*>(
-                        this->getChildByID("difficulty-sprite")))
-                    ds->updateDifficultyFrame(
-                        m_level->m_difficulty,
-                        (GJDifficultyName)0,
-                        (GJFeatureState)m_level->m_featured);
+                // Обновляем иконку сложности — заменяем спрайт
+                if(auto* diffNode=this->getChildByID("difficulty-sprite")){
+                    // Скрываем оригинал
+                    diffNode->setVisible(false);
+                    // Если уже есть наш — удаляем
+                    if(auto* old=this->getChildByID("cr-diff-icon"))
+                        old->removeFromParent();
+                    // Создаём новый
+                    auto* newDiff=cr::makeDifficultyIcon(info->difficulty,1.f);
+                    if(newDiff){
+                        newDiff->setID("cr-diff-icon");
+                        newDiff->setPosition(diffNode->getPosition());
+                        this->addChild(newDiff,10);
+                    }
+                }
 
-                // "Rated by" — только если уровень оценён
+                // "Rated by" — только на оцененных
                 if(this->getChildByID("cr-rated-by")) return;
                 auto win=CCDirector::get()->getWinSize();
                 auto* lbl=CCLabelBMFont::create(
@@ -1547,7 +1554,7 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
         return true;
     }
 
-    void onCRButton(CCObject*){
+    void onCRButton(CCObject*) {
         if(!m_level) return;
         auto id=cr::getLevelID(m_level);
         if(id<=0) return;
@@ -1561,20 +1568,17 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
                 });
         }
     }
+
     void onExit() override {
         if(m_fields->cancel) m_fields->cancel->store(true);
         LevelInfoLayer::onExit();
     }
 };
 
-// ════════════════════════════════════════════════════════════
-//  InfoLayer — "Rated by" в попапе уровня
-// ════════════════════════════════════════════════════════════
-
 class $modify(CRInfoLayer, InfoLayer) {
     struct Fields { cr::CancelToken cancel; };
 
-    bool init(GJGameLevel* level,GJUserScore* score,GJLevelList* list){
+    bool init(GJGameLevel* level, GJUserScore* score, GJLevelList* list) {
         if(!InfoLayer::init(level,score,list)) return false;
         if(!m_level) return true;
         auto id=cr::getLevelID(m_level);
@@ -1595,12 +1599,10 @@ class $modify(CRInfoLayer, InfoLayer) {
         cr::fetchRatedMeta(id,
             [label,cancel](std::optional<cr::LevelEntry> info){
                 if(cancel->load()||!label->getParent()) return;
-                // Только если оценён
                 if(!info||info->moderator.empty()){
                     label->setVisible(false); return;
                 }
-                label->setString(
-                    ("Rated by "+info->moderator).c_str());
+                label->setString(("Rated by "+info->moderator).c_str());
                 label->setVisible(true);
             },
             [label,cancel](std::string const&){
@@ -1610,6 +1612,7 @@ class $modify(CRInfoLayer, InfoLayer) {
         );
         return true;
     }
+
     void onExit() override {
         if(m_fields->cancel) m_fields->cancel->store(true);
         InfoLayer::onExit();
