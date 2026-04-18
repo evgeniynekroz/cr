@@ -9,8 +9,8 @@
     "id": "nekroz.customrates",
     "name": "Custom Rates",
     "version": "1.0.0-beta",
-    "developer": "Nekroz",
-    "description": "Custom rating system for Geometry Dash levels",
+    "developer": "nekroz",
+    "description": "Independent community-driven level rating system for Geometry Dash",
     "dependencies": {
         "geode.node-ids": ">=v1.20.0"
     },
