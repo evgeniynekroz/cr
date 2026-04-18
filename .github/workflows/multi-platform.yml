@@ -14,9 +14,11 @@ jobs:
         config:
         - name: Windows
           os: windows-latest
+          target: Win32
 
         - name: macOS
           os: macos-latest
+          target: MacOS
 
         - name: iOS
           os: macos-latest
@@ -37,14 +39,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the mod
-        uses: geode-sdk/build-geode-mod@main
+        uses: geode-sdk/build-geode-mod@v3
         with:
           combine: true
           target: ${{ matrix.config.target }}
-          # Принудительно собираем Codegen локально для Android
-          # Это решает проблему с загрузкой на Android32
-          build-config: |
-            ${{ (matrix.config.target == 'Android32' || matrix.config.target == 'Android64') && '-DSKIP_BUILDING_CODEGEN=OFF' || '' }}
+          sdk: "5.6.0"      # Актуальная стабильная версия SDK
+          cli: "latest"     # Всегда последний CLI (сейчас 3.8.3+)
 
   package:
     name: Package builds
@@ -52,7 +52,7 @@ jobs:
     needs: ['build']
 
     steps:
-      - uses: geode-sdk/build-geode-mod/combine@main
+      - uses: geode-sdk/build-geode-mod/combine@v3
         id: build
 
       - uses: actions/upload-artifact@v4
