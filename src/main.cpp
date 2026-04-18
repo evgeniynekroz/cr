@@ -982,6 +982,40 @@ protected:
             addChild(s,1);
         }
 
+        // ════════════════════════════════════════════════════════════
+        //  ДЕКОРАТИВНЫЕ ЭЛЕМЕНТЫ (как в Saved)
+        // ════════════════════════════════════════════════════════════
+        // Большая серая панель-заголовок вверху
+        auto* headerPanel = CCScale9Sprite::create("GJ_square02.png");
+        headerPanel->setContentSize({ win.width - 60.f, 50.f });
+        headerPanel->setPosition({ cx, win.height - 40.f });
+        headerPanel->setOpacity(180);
+        addChild(headerPanel, 1);
+
+        // Зелёный квадратик в левом нижнем углу
+        auto* greenSquare = CCSprite::createWithSpriteFrameName("GJ_button_01.png");
+        if (greenSquare) {
+            greenSquare->setPosition({ 25.f, 25.f });
+            greenSquare->setScale(0.8f);
+            addChild(greenSquare, 5);
+        }
+
+        // Синий квадратик в правом нижнем углу
+        auto* blueSquare = CCSprite::createWithSpriteFrameName("GJ_button_02.png");
+        if (blueSquare) {
+            blueSquare->setPosition({ win.width - 25.f, 25.f });
+            blueSquare->setScale(0.8f);
+            addChild(blueSquare, 5);
+        }
+
+        // Тонкие линии по бокам от списка
+        auto* leftLine = CCLayerColor::create(ccc4(80, 80, 80, 255), 3.f, kListH);
+        leftLine->setPosition({ cx - kListW/2.f - 8.f, cy - kListH/2.f + 10.f });
+        addChild(leftLine, 1);
+        auto* rightLine = CCLayerColor::create(ccc4(80, 80, 80, 255), 3.f, kListH);
+        rightLine->setPosition({ cx + kListW/2.f + 5.f, cy - kListH/2.f + 10.f });
+        addChild(rightLine, 1);
+
         // Статус
         m_statusLbl=CCLabelBMFont::create("Loading...","goldFont.fnt");
         m_statusLbl->setScale(0.32f);
@@ -994,20 +1028,21 @@ protected:
         m_pageLbl->setPosition({cx,cy-kListH/2.f-28.f});
         addChild(m_pageLbl,2);
 
-        // Стрелка влево
+        // Стрелка ВЛЕВО (предыдущая страница)
         auto* lm=CCMenu::create();
         lm->setPosition({0.f,0.f}); addChild(lm,3);
         auto* la=CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
-        if(la) la->setFlipX(true);
+        if(la) la->setFlipX(true); // стрелка указывает влево
         auto* lb=CCMenuItemSpriteExtra::create(
             la,this,menu_selector(CRBaseScene::onPrev));
         lb->setPosition({28.f,cy});
         lm->addChild(lb);
 
-        // Стрелка вправо
+        // Стрелка ВПРАВО (следующая страница)
         auto* rm=CCMenu::create();
         rm->setPosition({0.f,0.f}); addChild(rm,3);
         auto* ra=CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
+        // без flipX — стрелка указывает вправо
         auto* rb=CCMenuItemSpriteExtra::create(
             ra,this,menu_selector(CRBaseScene::onNext));
         rb->setPosition({win.width-28.f,cy});
@@ -1070,7 +1105,6 @@ protected:
         }
 
         // Стандартный CustomListView с BoomListType::Level
-        // — точно такой же вид как Saved Levels
         auto* listView=CustomListView::create(
             arr,
             BoomListType::Level,
@@ -1081,7 +1115,7 @@ protected:
         m_listLayer=GJListLayer::create(
             listView,
             m_title.c_str(),
-            ccc4(191,114,62,255), // коричневый фон как в Saved
+            ccc4(191,114,62,255),
             kListW,
             kListH,
             1);
@@ -1351,7 +1385,6 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
         if(!LevelInfoLayer::init(level,challenge)) return false;
         if(!m_level) return true;
 
-        // Не добавляем кнопку для официально оцененных уровней
         if(m_level->m_stars>0) return true;
 
         auto id=cr::getLevelID(m_level);
@@ -1360,7 +1393,6 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
         m_fields->cancel=cr::makeCancelToken();
         auto cancel=m_fields->cancel;
 
-        // Кнопка — blue_star.png
         auto* menu=this->getChildByID("left-side-menu");
         if(!menu){
             menu=CCMenu::create();
@@ -1370,7 +1402,6 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
             addChild(menu,10);
         }
         if(!menu->getChildByID("cr-rate-btn")){
-            // Пробуем blue_star.png из ресурсов мода
             auto* starSpr=CCSprite::create("blue_star.png"_spr);
             if(!starSpr||starSpr->getContentSize().width<2.f)
                 starSpr=CCSprite::createWithSpriteFrameName(
@@ -1384,7 +1415,6 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
             menu->updateLayout();
         }
 
-        // Загружаем мета из БД
         cr::fetchRatedMeta(id,
             [this,cancel](std::optional<cr::LevelEntry> info){
                 if(cancel->load()||!m_level) return;
@@ -1392,7 +1422,6 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
 
                 cr::applyRateToLevel(m_level,*info);
 
-                // Заменяем иконку сложности
                 if(auto* diffNode=this->getChildByID("difficulty-sprite")){
                     diffNode->setVisible(false);
                     if(auto* old=this->getChildByID("cr-diff-icon"))
@@ -1405,7 +1434,6 @@ class $modify(CRLevelInfoLayer, LevelInfoLayer) {
                     }
                 }
 
-                // "Rated by" — только на оцененных
                 if(this->getChildByID("cr-rated-by")) return;
                 auto win=CCDirector::get()->getWinSize();
                 auto* lbl=CCLabelBMFont::create(
