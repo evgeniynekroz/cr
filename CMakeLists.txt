@@ -1,9 +1,9 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.21)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Для iOS/macOS — архитектуры
-if(IOS)
+# Настройка архитектур для Apple
+if (IOS)
     set(CMAKE_OSX_ARCHITECTURES "arm64")
 elseif(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
@@ -14,38 +14,25 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 project(customrates VERSION 1.0.0)
 
 # ════════════════════════════════════════════════════════════
-#  НОВЫЙ СТИЛЬ GEODE V5
+#  СТАРЫЙ СТИЛЬ GEODE (СОВМЕСТИМ С ЭКШЕНОМ)
 # ════════════════════════════════════════════════════════════
 
-# Находим Geode SDK (автоматически через CPM)
-find_package(Geode REQUIRED)
+# 1. Проверяем, что экшен установил путь к SDK
+if (NOT DEFINED ENV{GEODE_SDK})
+    message(FATAL_ERROR "GEODE_SDK environment variable is not set!")
+endif()
 
-# КРИТИЧЕСКИ ВАЖНО: настраиваем платформу
-geode_configure_platform()
+# 2. Подключаем SDK напрямую
+add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
-# Собираем все исходники из папки src
+# 3. Собираем все исходники
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS 
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp
 )
 
-# Создаём библиотеку мода
-geode_library(
-    SOURCES ${SOURCES}
-)
+# 4. Создаем библиотеку мода
+add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
-# Копируем ресурсы (если есть папка resources)
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/resources)
-    geode_copy_resources(
-        TARGET ${PROJECT_NAME}
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/resources
-    )
-endif()
-
-# Финальная настройка мода
-geode_configure_mod(
-    TARGET ${PROJECT_NAME}
-    ID "nekroz.customrates"
-    NAME "Custom Rates"
-    DEVELOPER "Nekroz"
-)
+# 5. Настраиваем мод (старая функция)
+setup_geode_mod(${PROJECT_NAME})
