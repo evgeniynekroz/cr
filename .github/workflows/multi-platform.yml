@@ -41,6 +41,10 @@ jobs:
         with:
           combine: true
           target: ${{ matrix.config.target }}
+          # Принудительно собираем Codegen локально для Android
+          # Это решает проблему с загрузкой на Android32
+          build-config: |
+            ${{ (matrix.config.target == 'Android32' || matrix.config.target == 'Android64') && '-DSKIP_BUILDING_CODEGEN=OFF' || '' }}
 
   package:
     name: Package builds
